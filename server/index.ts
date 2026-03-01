@@ -1,3 +1,12 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+
+// Polyfill WebSocket for Node.js 20 (required by @julesl23/s5js P2P layer)
+if (typeof globalThis.WebSocket === "undefined") {
+  const WS = require("ws");
+  (globalThis as any).WebSocket = WS;
+}
+
 import express from "express";
 import cors from "cors";
 import archiveRouter from "./routes/archive.js";

@@ -40,7 +40,7 @@ router.post("/archive", async (req: Request, res: Response) => {
   }
 
   try {
-    const s5 = await getS5Client();
+    const { fs } = await getS5Client();
 
     // 1) Download audio from Supabase Storage (public URL)
     console.log(`[Archive] Downloading audio for recording ${recording_id}...`);
@@ -49,18 +49,25 @@ router.post("/archive", async (req: Request, res: Response) => {
       throw new Error(`Failed to download audio: HTTP ${audioRes.status}`);
     }
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    const ext = file_path.split(".").pop() || "webm";
-    const mimeType = ext === "m4a" ? "audio/mp4"
-      : ext === "ogg" ? "audio/ogg"
-      : ext === "wav" ? "audio/wav"
-      : "audio/webm";
+    const ext = (file_path.split(".").pop() || "webm").toLowerCase();
+    const mimeType =
+      ext === "m4a" ? "audio/mp4" :
+      ext === "ogg" ? "audio/ogg" :
+      ext === "wav" ? "audio/wav" :
+      "audio/webm";
 
     // 2) Upload audio to S5
     const audioS5Path = `recordings/${recording_id}/audio.${ext}`;
     console.log(`[Archive] Uploading audio to S5 at: ${audioS5Path}`);
-    await s5.fs.put(audioS5Path, audioBuffer, { mimeType });
-    const audioMeta = await s5.fs.getMetadata(audioS5Path);
-    const audioCid: string = (audioMeta as any).hash ?? audioS5Path;
+    await fs.put(audioS5Path, audioBuffer, { mimeType });
+
+    let audioCid = audioS5Path;
+    try {
+      const audioMeta = await fs.getMetadata(audioS5Path);
+      audioCid = (audioMeta as any)?.hash ?? (audioMeta as any)?.cid ?? audioS5Path;
+    } catch {
+      audioCid = audioS5Path;
+    }
 
     // 3) Build and upload metadata JSON to S5
     const metadataPayload = {
@@ -70,11 +77,17 @@ router.post("/archive", async (req: Request, res: Response) => {
     };
     const metadataS5Path = `recordings/${recording_id}/metadata.json`;
     console.log(`[Archive] Uploading metadata to S5 at: ${metadataS5Path}`);
-    await s5.fs.put(metadataS5Path, JSON.stringify(metadataPayload, null, 2), {
+    await fs.put(metadataS5Path, JSON.stringify(metadataPayload, null, 2), {
       mimeType: "application/json",
     });
-    const metaMeta = await s5.fs.getMetadata(metadataS5Path);
-    const metadataCid: string = (metaMeta as any).hash ?? metadataS5Path;
+
+    let metadataCid = metadataS5Path;
+    try {
+      const metaMeta = await fs.getMetadata(metadataS5Path);
+      metadataCid = (metaMeta as any)?.hash ?? (metaMeta as any)?.cid ?? metadataS5Path;
+    } catch {
+      metadataCid = metadataS5Path;
+    }
 
     console.log(`[Archive] Recording ${recording_id} archived. Audio CID: ${audioCid}, Metadata CID: ${metadataCid}`);
 
@@ -91,7 +104,10 @@ router.post("/archive", async (req: Request, res: Response) => {
 
     if (updateError) {
       console.error("[Archive] Failed to update recording with CIDs:", updateError);
-      res.status(500).json({ error: "Archival succeeded but DB update failed", details: updateError.message });
+      res.status(500).json({
+        error: "Archival succeeded but DB update failed",
+        details: updateError.message,
+      });
       return;
     }
 
