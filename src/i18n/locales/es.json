@@ -1,0 +1,39 @@
+{
+  "app": {
+    "title": "Chi Voice",
+    "subtitle": "Preservando idiomas indígenas a través de tu voz"
+  },
+  "home": {
+    "heroTitle": "Chi Voice",
+    "heroSubtitle": "Preservando idiomas indígenas a través de tu voz",
+    "heroDescription": "Únete a nuestra comunidad para construir la colección más grande del mundo de grabaciones de idiomas indígenas. Tu voz ayuda a preservar el patrimonio cultural para las generaciones futuras.",
+    "startRecording": "Comenzar grabación",
+    "mission": "Nuestra misión",
+    "missionDescription": "Los idiomas indígenas llevan la sabiduría, cultura e identidad de comunidades en todo el mundo. Con muchos idiomas en riesgo de desaparecer, Chi Voice empodera a los hablantes nativos para preservar su patrimonio lingüístico a través de grabaciones de voz que entrenarán futuros modelos de traducción de IA y mantendrán estos preciosos idiomas vivos para las generaciones venideras.",
+    "chooseLanguage": "Elige tu idioma",
+    "chooseLanguageDescription": "Selecciona un idioma indígena para comenzar tu viaje de grabación. Cada contribución ayuda a preservar el patrimonio cultural.",
+    "searchLanguages": "Buscar idiomas...",
+    "noLanguagesFound": "No se encontraron idiomas",
+    "tryAdjustingSearch": "Intenta ajustar tus criterios de búsqueda.",
+    "languageNotAvailable": "Idioma no disponible",
+    "languageNotAvailableDescription": "Este idioma aún no está disponible para grabación.",
+    "joinCommunity": "Únete a nuestra comunidad global",
+    "communityDescription": "Juntos, estamos creando el conjunto de datos de idiomas indígenas más completo del mundo. Cada grabación que haces ayuda a preservar el patrimonio cultural y habilita futuras herramientas de traducción de IA.",
+    "recordings": "Grabaciones",
+    "languages": "Idiomas",
+    "contributors": "Contribuyentes",
+    "tasksAvailable": "tareas disponibles"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "chats": "Chats",
+    "profile": "Perfil"
+  },
+  "settings": {
+    "language": "Idioma",
+    "theme": "Tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  }
+}

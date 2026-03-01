@@ -1,0 +1,192 @@
+{
+  "app": {
+    "title": "智语",
+    "subtitle": "通过您的声音保护原住民语言"
+  },
+  "home": {
+    "heroTitle": "智语",
+    "heroSubtitle": "通过您的声音保护原住民语言",
+    "heroDescription": "加入我们的社区，建设世界上最大的原住民语言录音收藏。您的声音有助于为后代保护文化遗产。",
+    "startRecording": "开始录音",
+    "mission": "我们的使命",
+    "missionDescription": "原住民语言承载着全世界社区的智慧、文化和身份。随着许多语言面临消失的风险，智语赋权本族语言使用者通过语音录音保护他们的语言遗产，这些录音将训练未来的AI翻译模型，让这些珍贵的语言为后代传承。",
+    "chooseLanguage": "选择您的语言",
+    "chooseLanguageDescription": "选择一种原住民语言开始您的录音之旅。每个贡献都有助于保护文化遗产。",
+    "searchLanguages": "搜索语言...",
+    "noLanguagesFound": "未找到语言",
+    "tryAdjustingSearch": "尝试调整您的搜索条件。",
+    "languageNotAvailable": "语言不可用",
+    "languageNotAvailableDescription": "此语言尚未可用于录音。",
+    "joinCommunity": "加入我们的全球社区",
+    "communityDescription": "我们正在共同创建世界上最全面的原住民语言数据集。您制作的每个录音都有助于保护文化遗产并实现未来的AI翻译工具。",
+    "recordings": "录音",
+    "languages": "语言",
+    "contributors": "贡献者",
+    "tasksAvailable": "可用任务",
+    "popular": "热门",
+    "globalLabel": "全球",
+    "unknown": "未知"
+  },
+  "navigation": {
+    "home": "主页",
+    "chats": "聊天",
+    "profile": "个人资料"
+  },
+  "settings": {
+    "language": "语言",
+    "theme": "主题",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "系统",
+    "toggleTheme": "切换主题"
+  },
+  "common": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "daysAgo": "{{count}} 天前"
+  },
+  "chats": {
+    "title": "进行中的聊天",
+    "subtitle": "继续你的语言录音会话",
+    "loading": "正在加载你的聊天...",
+    "searchPlaceholder": "搜索你的进行中聊天...",
+    "startNew": "开始新的语言聊天",
+    "emptyTitle": "暂无进行中的聊天",
+    "emptyDesc": "开始你的首次语言录音会话后将显示在此处。",
+    "startRecordingBtn": "开始录音",
+    "progressSummary": "{{completed}} / {{total}} 个任务已完成",
+    "errors": {
+      "loadTitle": "加载聊天出错"
+    }
+  },
+  "auth": {
+    "title": "加入语言保护行动",
+    "subtitle": "帮助保护原住民语言，传承给后代",
+    "signin": "登录",
+    "signup": "注册",
+    "email": "邮箱",
+    "password": "密码",
+    "emailPlaceholder": "your.email@example.com",
+    "signingIn": "正在登录...",
+    "createAccount": "创建账户",
+    "creatingAccount": "正在创建账户...",
+    "orContinue": "或继续使用",
+    "continueWithGoogle": "使用 Google 继续",
+    "termsNote": "注册即表示你愿意帮助保护原住民语言并为全球文化遗产数据库做出贡献。",
+    "checkEmailTitle": "请查收邮箱",
+    "checkEmailDesc": "我们已向你发送确认链接以完成注册。",
+    "welcomeBackTitle": "欢迎回来！",
+    "welcomeBackDesc": "你已成功登录。",
+    "errorTitle": "认证错误"
+  },
+  "chat": {
+    "header": {
+      "recordingsCompleted": "已完成 {{count}} 条录音"
+    },
+    "toasts": {
+      "needMoreTitle": "请先完成更多录音",
+      "needMoreDesc": "至少完成 2 条录音即可解锁下一个任务。",
+      "taskGenTitle": "任务生成",
+      "newTaskTitle": "已生成新任务！",
+      "newTaskDesc": "准备好进行下一次录音。",
+      "errorLoadLangTitle": "加载语言出错",
+      "errorGenTitle": "生成任务出错",
+      "errorSaveTitle": "保存录音出错",
+      "saveSuccessTitle": "录音已保存！",
+      "saveSuccessDesc": "你的翻译已成功保存。"
+    },
+    "playback": {
+      "error": "播放错误",
+      "cannotPlay": "无法播放此音频。",
+      "autoplayPrevented": "自动播放被阻止，请点击重试。"
+    },
+    "buttons": {
+      "record": "录音",
+      "recordAgain": "再录一次",
+      "recordCurrent": "录制当前任务",
+      "nextTask": "下一个任务",
+      "generating": "正在生成...",
+      "recordToUnlock": "录制 2 条以解锁"
+    },
+    "recorded": "已录制：\"{{text}}\""
+  },
+  "task": {
+    "translation": "翻译",
+    "englishText": "英语文本：",
+    "approxMinutes": "~{{minutes}} 分钟",
+    "id": "ID",
+    "completed": "已完成 ✓",
+    "startRecording": "开始录音",
+    "type": {
+      "word": "词语",
+      "phrase": "短语",
+      "sentence": "句子"
+    },
+    "difficulty": {
+      "beginner": "初级",
+      "intermediate": "中级",
+      "advanced": "高级"
+    }
+  },
+  "modal": {
+    "title": "录制翻译",
+    "description": "请将英文文本翻译为你的母语并录音",
+    "englishTextLabel": "待翻译的英文：",
+    "instructionsTitle": "录音说明：",
+    "instructions": {
+      "speakClearly": "• 清晰、自然地说话",
+      "quietEnv": "• 在安静的环境中录制",
+      "accurate": "• 请提供准确的母语翻译",
+      "rerecord": "• 提交前可重新录制"
+    },
+    "yourRecording": "你的录音：",
+    "notesLabel": "附加备注（可选）",
+    "notesPlaceholder": "添加任何与你的翻译相关的上下文、发音备注或文化信息...",
+    "cancel": "取消",
+    "submit": "提交录音",
+    "submitting": "正在提交...",
+    "noRecordingTitle": "未找到录音",
+    "noRecordingDesc": "请先录制你的翻译。",
+    "submitSuccessTitle": "录音已提交！",
+    "submitSuccessDesc": "感谢你为保护原住民语言做出的贡献。",
+    "submitErrorTitle": "提交失败",
+    "submitErrorDesc": "提交录音时出错，请重试。"
+  },
+  "recorder": {
+    "recordingInProgress": "录音进行中…",
+    "recordingComplete": "录音完成！你可以试听或重新录制。",
+    "tapToStart": "点击麦克风开始录音"
+  },
+  "profile": {
+    "loading": "正在加载个人资料…",
+    "memberSince": "会员自",
+    "points": "积分",
+    "recordings": "录音",
+    "languages": "语言",
+    "minutes": "分钟",
+    "dayStreak": "连续天数",
+    "inviteTitle": "邀请朋友（每人 50 积分）",
+    "referral": "推荐",
+    "copied": "已复制推荐链接",
+    "copy": "复制",
+    "achievements": "成就",
+    "firstRecording": "第一条录音",
+    "firstRecordingDesc": "完成你的第一个任务",
+    "polyglot": "多语者",
+    "polyglotDesc": "在 5 种语言中录音",
+    "voiceActor": "配音者",
+    "voiceActorDesc": "完成 100 条录音",
+    "dedicated": "坚持",
+    "dedicatedDesc": "连续 7 天录音",
+    "viewActiveChats": "查看进行中的聊天",
+    "signOut": "退出登录",
+    "user": "用户",
+    "recently": "最近",
+    "levels": {
+      "beginner": "初学者",
+      "intermediate": "中级",
+      "advanced": "高级",
+      "expert": "专家"
+    }
+  }
+}

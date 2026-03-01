@@ -1,0 +1,39 @@
+{
+  "app": {
+    "title": "Chi Voice",
+    "subtitle": "Préserver les langues indigènes grâce à votre voix"
+  },
+  "home": {
+    "heroTitle": "Chi Voice",
+    "heroSubtitle": "Préserver les langues indigènes grâce à votre voix",
+    "heroDescription": "Rejoignez notre communauté pour construire la plus grande collection d'enregistrements de langues indigènes au monde. Votre voix aide à préserver l'héritage culturel pour les générations futures.",
+    "startRecording": "Commencer l'enregistrement",
+    "mission": "Notre mission",
+    "missionDescription": "Les langues indigènes portent la sagesse, la culture et l'identité des communautés du monde entier. Avec de nombreuses langues risquant de disparaître, Chi Voice permet aux locuteurs natifs de préserver leur héritage linguistique grâce à des enregistrements vocaux qui formeront les futurs modèles de traduction IA et garderont ces langues précieuses vivantes pour les générations à venir.",
+    "chooseLanguage": "Choisissez votre langue",
+    "chooseLanguageDescription": "Sélectionnez une langue indigène pour commencer votre parcours d'enregistrement. Chaque contribution aide à préserver l'héritage culturel.",
+    "searchLanguages": "Rechercher des langues...",
+    "noLanguagesFound": "Aucune langue trouvée",
+    "tryAdjustingSearch": "Essayez d'ajuster vos critères de recherche.",
+    "languageNotAvailable": "Langue non disponible",
+    "languageNotAvailableDescription": "Cette langue n'est pas encore disponible pour l'enregistrement.",
+    "joinCommunity": "Rejoignez notre communauté mondiale",
+    "communityDescription": "Ensemble, nous créons le jeu de données de langues indigènes le plus complet au monde. Chaque enregistrement que vous faites aide à préserver l'héritage culturel et permet les futurs outils de traduction IA.",
+    "recordings": "Enregistrements",
+    "languages": "Langues",
+    "contributors": "Contributeurs",
+    "tasksAvailable": "tâches disponibles"
+  },
+  "navigation": {
+    "home": "Accueil",
+    "chats": "Conversations",
+    "profile": "Profil"
+  },
+  "settings": {
+    "language": "Langue",
+    "theme": "Thème",
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  }
+}

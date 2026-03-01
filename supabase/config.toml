@@ -1,0 +1,7 @@
+project_id = "cucajqnbauuotwhekppy"
+
+[functions.get-public-stats]
+verify_jwt = false
+
+[functions.archive-to-sia]
+verify_jwt = false
