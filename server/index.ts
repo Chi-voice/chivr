@@ -13,9 +13,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import archiveRouter from "./routes/archive.js";
 
+import { existsSync } from "fs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const IS_PROD = process.env.NODE_ENV === "production";
+const distDir = path.join(__dirname, "..", "dist");
+const IS_PROD = process.env.NODE_ENV === "production" || existsSync(path.join(distDir, "index.html"));
 const PORT = parseInt(process.env.PORT || (IS_PROD ? "5000" : "3001"), 10);
 
 app.use(cors({ origin: "*" }));
@@ -29,7 +32,6 @@ app.use("/api", archiveRouter);
 
 // In production, serve the Vite-built frontend from dist/
 if (IS_PROD) {
-  const distDir = path.join(__dirname, "..", "dist");
   app.use(express.static(distDir));
   // SPA fallback — all non-API routes return index.html
   app.get(/.*/, (_req, res) => {
