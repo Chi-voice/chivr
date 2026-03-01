@@ -8,7 +8,7 @@ channel = "stable-25_05"
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["npx", "tsx", "server/index.ts"]
+run = ["bash", "-c", "NODE_ENV=production npx tsx server/index.ts"]
 build = ["npm", "run", "build"]
 publicDir = "dist/public"
 
