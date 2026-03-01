@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { useTranslation } from 'react-i18next';
+import { archiveToS5 } from '@/lib/s5Archive';
 
 interface Message {
   id: string;
@@ -359,6 +360,28 @@ const Chat = () => {
         .single();
       if (insertError) throw insertError;
 
+      // 5) Archive to Sia via S5 (fire-and-forget, does not block the UI)
+      const sysMsg = messages.find((m) => m.type === 'system' && m.id === taskId);
+      archiveToS5({
+        recording_id: insertedRecording.id,
+        audio_url: audioUrl,
+        file_path: filePath,
+        metadata: {
+          task_id: taskId,
+          language: language?.name ?? '',
+          language_code: language?.code ?? '',
+          english_text: sysMsg?.content ?? '',
+          task_type: sysMsg?.taskType ?? 'sentence',
+          difficulty: sysMsg?.difficulty ?? 'beginner',
+          user_id: user.id,
+          duration,
+          notes: notes || undefined,
+          recorded_at: new Date().toISOString(),
+        },
+      }).then((result) => {
+        if (!result.success) console.warn('[S5] Archival failed (non-blocking):', result.error);
+        else console.log('[S5] Archived — audio CID:', result.audio_cid, 'metadata CID:', result.metadata_cid);
+      });
 
       // 5) Optimistically add the new recording to the chat UI
       const sysMessage = messages.find((m) => m.type === 'system' && m.id === taskId);
