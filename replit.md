@@ -1,7 +1,7 @@
 # Chi Voice — Language Preservation Platform
 
 ## Overview
-Chi Voice is a web app that helps users contribute to indigenous and minority language preservation by recording themselves speaking AI-generated prompts (words, phrases, sentences). Recordings are stored in Supabase Storage and optionally archived to Sia decentralized storage.
+Chi Voice is a web app that helps users contribute to indigenous and minority language preservation by recording themselves speaking AI-generated prompts (words, phrases, sentences). Recordings are stored in Supabase Storage and archived to Sia decentralised storage via the S5 protocol.
 
 ## Architecture
 
@@ -12,19 +12,33 @@ Chi Voice is a web app that helps users contribute to indigenous and minority la
 - State/data: `@tanstack/react-query` v5
 - Theme: `next-themes` (light/dark)
 
+**API Server**: Express on port 3001 (Node.js 20, tsx)
+- Proxied through Vite at `/api/*`
+- Handles S5/Sia archival (requires `@julesl23/s5js`)
+- Reads `S5_SEED_PHRASE`, `S5_PORTAL_URL`, `SUPABASE_SERVICE_ROLE_KEY` from env
+
 **Backend**: Supabase (fully managed)
 - Auth: Supabase Auth (email/password + Google OAuth)
 - Database: Supabase PostgreSQL (with RLS)
 - Storage: Supabase Storage (`recordings` bucket, public read)
-- Edge Functions: Deno-based serverless functions
+- Edge Functions: Deno-based (generate-task, get-public-stats, upsert-language)
 
-**No local Express server** — this is a frontend-only Vite app that communicates directly with Supabase.
+## S5 / Sia Archival Flow
+
+1. User records audio → uploaded to Supabase Storage (unchanged)
+2. Recording row inserted in Supabase DB
+3. Frontend calls `POST /api/archive` (fire-and-forget, non-blocking)
+4. Express server:
+   - Downloads audio from Supabase public URL
+   - Uploads **audio file** to S5 at `recordings/{id}/audio.<ext>`
+   - Uploads **metadata JSON** to S5 at `recordings/{id}/metadata.json`
+   - Updates `recordings` row with `sia_cid`, `sia_metadata_cid`, `sia_archived_at`
 
 ## Database Schema (Supabase)
 - `profiles` — user profiles with display_name, points, total_recordings
 - `languages` — language catalog with code, name, is_popular
 - `tasks` — recording prompts (english_text, type, difficulty, sequence_order, is_starter_task)
-- `recordings` — user audio recordings linked to tasks; includes sia_cid for decentralized archival
+- `recordings` — user audio recordings; includes `sia_cid`, `sia_metadata_cid`, `sia_archived_at`
 - `user_task_progress` — per-user per-language progress tracking
 - `referrals` — referral tracking with points_awarded
 
@@ -32,26 +46,34 @@ Chi Voice is a web app that helps users contribute to indigenous and minority la
 - `generate-task` — generates AI tasks via OpenAI GPT-4o-mini
 - `get-public-stats` — returns global recording/language/contributor counts
 - `upsert-language` — creates or resolves a language by code/name
-- `archive-to-sia` — archives recordings to Sia decentralized storage via S5
+- `archive-to-sia` — legacy raw-HTTP archival (superseded by `/api/archive`)
 
 ## Key Files
 - `src/integrations/supabase/client.ts` — Supabase client (hardcoded URL + anon key)
-- `src/pages/Index.tsx` — landing page with language list
-- `src/pages/Auth.tsx` — authentication (email + Google)
-- `src/pages/Chat.tsx` — recording chat interface per language
-- `src/pages/Chats.tsx` — list of active language chats
-- `src/pages/Profile.tsx` — user profile + stats + referral link
-- `src/components/AudioRecorder.tsx` — browser MediaRecorder-based audio capture
-- `src/components/RecordingModal.tsx` — modal for recording + submitting
+- `src/lib/s5Archive.ts` — frontend helper that calls `POST /api/archive`
+- `src/pages/Chat.tsx` — recording chat interface; triggers S5 archival after each recording
+- `server/index.ts` — Express API server (port 3001)
+- `server/services/s5Client.ts` — lazy S5 client singleton using `@julesl23/s5js`
+- `server/routes/archive.ts` — `POST /api/archive` endpoint
 - `public/glottolog-full.csv` — full Glottolog language database for search
-- `src/data/glottolog-subset.json` — smaller subset of Glottolog for faster loading
+
+## Required Environment Secrets
+| Secret | Description |
+|--------|-------------|
+| `S5_SEED_PHRASE` | 12-word seed phrase for S5 identity (generate once, never change) |
+| `S5_PORTAL_URL` | S5 portal URL, e.g. `https://s5.vup.cx` |
+| `S5_INITIAL_PEERS` | Comma-separated WebSocket peer URIs for P2P bootstrap |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server-side RLS bypass for DB updates) |
 
 ## Dev Workflow
-- `npm run dev` — starts Vite dev server on port 5000
-- Workflow: "Start application" runs `npm run dev`
+- `npm run dev` → starts Vite on port 5000 (frontend only)
+- Workflow "Start application" → `npx concurrently "npx vite" "npx tsx server/index.ts"` (both servers)
+- Vite proxies `/api/*` to Express on port 3001
 
 ## Replit Migration Notes (from Lovable)
 - Removed `lovable-tagger` dev dependency
-- Updated `vite.config.ts`: port changed to 5000, host set to `0.0.0.0`, removed lovable-tagger plugin
-- Supabase credentials are hardcoded in `src/integrations/supabase/client.ts` (anon key, public URL — safe to expose)
-- The Replit PostgreSQL database (via `DATABASE_URL`) is not used — all data lives in Supabase
+- Updated `vite.config.ts`: port 5000, host `0.0.0.0`, added `/api` proxy, removed lovable-tagger
+- Added Express API server for S5 integration (Node.js npm packages not available in Deno edge functions)
+- Supabase anon key is hardcoded in `src/integrations/supabase/client.ts` (safe — public anon key)
+- The Replit PostgreSQL database (`DATABASE_URL`) is not used — all data lives in Supabase
