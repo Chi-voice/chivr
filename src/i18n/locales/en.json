@@ -1,0 +1,192 @@
+{
+  "app": {
+    "title": "Chi Voice",
+    "subtitle": "Preserving Indigenous Languages Through Your Voice"
+  },
+  "home": {
+    "heroTitle": "Chi Voice",
+    "heroSubtitle": "Preserving Indigenous Languages Through Your Voice",
+    "heroDescription": "Join our community in building the world's largest collection of indigenous language recordings. Your voice helps preserve cultural heritage for future generations.",
+    "startRecording": "Start Recording",
+    "mission": "Our Mission",
+    "missionDescription": "Indigenous languages carry the wisdom, culture, and identity of communities worldwide. With many languages at risk of disappearing, Chi Voice empowers native speakers to preserve their linguistic heritage through voice recordings that will train future AI translation models and keep these precious languages alive for generations to come.",
+    "chooseLanguage": "Choose Your Language",
+    "chooseLanguageDescription": "Select an indigenous language to start your recording journey. Each contribution helps preserve cultural heritage.",
+    "searchLanguages": "Search languages...",
+    "noLanguagesFound": "No languages found",
+    "tryAdjustingSearch": "Try adjusting your search criteria.",
+    "languageNotAvailable": "Language not available",
+    "languageNotAvailableDescription": "This language is not yet available for recording.",
+    "joinCommunity": "Join Our Global Community",
+    "communityDescription": "Together, we're creating the world's most comprehensive indigenous language dataset. Every recording you make helps preserve cultural heritage and enables future AI translation tools.",
+    "recordings": "Recordings",
+    "languages": "Languages",
+    "contributors": "Contributors",
+    "tasksAvailable": "tasks available",
+    "popular": "Popular",
+    "globalLabel": "Global",
+    "unknown": "Unknown"
+  },
+  "navigation": {
+    "home": "Home",
+    "chats": "Chats",
+    "profile": "Profile"
+  },
+  "settings": {
+    "language": "Language",
+    "theme": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "toggleTheme": "Toggle theme"
+  },
+  "common": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "daysAgo": "{{count}} days ago"
+  },
+  "chats": {
+    "title": "Active Chats",
+    "subtitle": "Continue your language recording sessions",
+    "loading": "Loading your chats...",
+    "searchPlaceholder": "Search your active chats...",
+    "startNew": "Start New Language Chat",
+    "emptyTitle": "No active chats",
+    "emptyDesc": "Start your first language recording session to see it here.",
+    "startRecordingBtn": "Start Recording",
+    "progressSummary": "{{completed}} of {{total}} tasks completed",
+    "errors": {
+      "loadTitle": "Error loading chats"
+    }
+  },
+  "auth": {
+    "title": "Join the Language Preservation Movement",
+    "subtitle": "Help preserve indigenous languages for future generations",
+    "signin": "Sign In",
+    "signup": "Sign Up",
+    "email": "Email",
+    "password": "Password",
+    "emailPlaceholder": "your.email@example.com",
+    "signingIn": "Signing in...",
+    "createAccount": "Create Account",
+    "creatingAccount": "Creating account...",
+    "orContinue": "Or continue with",
+    "continueWithGoogle": "Continue with Google",
+    "termsNote": "By signing up, you agree to help preserve indigenous languages and contribute to our global cultural heritage database.",
+    "checkEmailTitle": "Check your email",
+    "checkEmailDesc": "We've sent you a confirmation link to complete your registration.",
+    "welcomeBackTitle": "Welcome back!",
+    "welcomeBackDesc": "You've been signed in successfully.",
+    "errorTitle": "Authentication Error"
+  },
+  "chat": {
+    "header": {
+      "recordingsCompleted": "{{count}} recordings completed"
+    },
+    "toasts": {
+      "needMoreTitle": "Complete more recordings",
+      "needMoreDesc": "Please complete at least 2 recordings to unlock the next task.",
+      "taskGenTitle": "Task Generation",
+      "newTaskTitle": "New task generated!",
+      "newTaskDesc": "Ready for your next recording.",
+      "errorLoadLangTitle": "Error loading language",
+      "errorGenTitle": "Error generating task",
+      "errorSaveTitle": "Error saving recording",
+      "saveSuccessTitle": "Recording saved!",
+      "saveSuccessDesc": "Your translation has been saved successfully."
+    },
+    "playback": {
+      "error": "Playback error",
+      "cannotPlay": "Unable to play this audio.",
+      "autoplayPrevented": "Autoplay prevented, tap to try again."
+    },
+    "buttons": {
+      "record": "Record",
+      "recordAgain": "Record Again",
+      "recordCurrent": "Record Current Task",
+      "nextTask": "Next Task",
+      "generating": "Generating...",
+      "recordToUnlock": "Record 2 to unlock"
+    },
+    "recorded": "Recorded: \"{{text}}\""
+  },
+  "task": {
+    "translation": "Translation",
+    "englishText": "English Text:",
+    "approxMinutes": "~{{minutes}} min",
+    "id": "ID",
+    "completed": "Completed ✓",
+    "startRecording": "Start Recording",
+    "type": {
+      "word": "Word",
+      "phrase": "Phrase",
+      "sentence": "Sentence"
+    },
+    "difficulty": {
+      "beginner": "Beginner",
+      "intermediate": "Intermediate",
+      "advanced": "Advanced"
+    }
+  },
+  "modal": {
+    "title": "Record Translation",
+    "description": "Record your translation of the English text into your indigenous language",
+    "englishTextLabel": "English Text to Translate:",
+    "instructionsTitle": "Recording Instructions:",
+    "instructions": {
+      "speakClearly": "• Speak clearly and at a natural pace",
+      "quietEnv": "• Record in a quiet environment",
+      "accurate": "• Provide an accurate translation in your indigenous language",
+      "rerecord": "• You can re-record if needed before submitting"
+    },
+    "yourRecording": "Your Recording:",
+    "notesLabel": "Additional Notes (Optional)",
+    "notesPlaceholder": "Add any context, pronunciation notes, or cultural information about your translation...",
+    "cancel": "Cancel",
+    "submit": "Submit Recording",
+    "submitting": "Submitting...",
+    "noRecordingTitle": "No recording found",
+    "noRecordingDesc": "Please record your translation before submitting.",
+    "submitSuccessTitle": "Recording submitted!",
+    "submitSuccessDesc": "Thank you for your contribution to preserving indigenous languages.",
+    "submitErrorTitle": "Submission failed",
+    "submitErrorDesc": "There was an error submitting your recording. Please try again."
+  },
+  "recorder": {
+    "recordingInProgress": "Recording in progress...",
+    "recordingComplete": "Recording complete! Play to review or record again.",
+    "tapToStart": "Tap the microphone to start recording"
+  },
+  "profile": {
+    "loading": "Loading profile...",
+    "memberSince": "Member since",
+    "points": "points",
+    "recordings": "Recordings",
+    "languages": "Languages",
+    "minutes": "Minutes",
+    "dayStreak": "Day Streak",
+    "inviteTitle": "Invite friends (50 points each)",
+    "referral": "Referral",
+    "copied": "Copied referral link",
+    "copy": "Copy",
+    "achievements": "Achievements",
+    "firstRecording": "First Recording",
+    "firstRecordingDesc": "Complete your first task",
+    "polyglot": "Polyglot",
+    "polyglotDesc": "Record in 5 languages",
+    "voiceActor": "Voice Actor",
+    "voiceActorDesc": "Complete 100 recordings",
+    "dedicated": "Dedicated",
+    "dedicatedDesc": "7-day recording streak",
+    "viewActiveChats": "View Active Chats",
+    "signOut": "Sign Out",
+    "user": "User",
+    "recently": "Recently",
+    "levels": {
+      "beginner": "Beginner",
+      "intermediate": "Intermediate",
+      "advanced": "Advanced",
+      "expert": "Expert"
+    }
+  }
+}
