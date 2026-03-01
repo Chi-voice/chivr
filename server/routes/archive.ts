@@ -40,7 +40,7 @@ router.post("/archive", async (req: Request, res: Response) => {
   }
 
   try {
-    const { fs } = await getS5Client();
+    const { apiWithIdentity } = await getS5Client();
 
     // 1) Download audio from Supabase Storage (public URL)
     console.log(`[Archive] Downloading audio for recording ${recording_id}...`);
@@ -48,7 +48,7 @@ router.post("/archive", async (req: Request, res: Response) => {
     if (!audioRes.ok) {
       throw new Error(`Failed to download audio: HTTP ${audioRes.status}`);
     }
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    const audioBuffer = await audioRes.arrayBuffer();
     const ext = (file_path.split(".").pop() || "webm").toLowerCase();
     const mimeType =
       ext === "m4a" ? "audio/mp4" :
@@ -56,51 +56,46 @@ router.post("/archive", async (req: Request, res: Response) => {
       ext === "wav" ? "audio/wav" :
       "audio/webm";
 
-    // 2) Upload audio to S5
-    const audioS5Path = `recordings/${recording_id}/audio.${ext}`;
-    console.log(`[Archive] Uploading audio to S5 at: ${audioS5Path}`);
-    await fs.put(audioS5Path, audioBuffer, { mimeType });
+    // 2) Upload audio blob directly to S5 portal
+    console.log(`[Archive] Uploading audio blob to S5 (${audioBuffer.byteLength} bytes, ${mimeType})...`);
+    const audioBlobForUpload = new Blob([audioBuffer], { type: mimeType });
+    const audioCidObj = await (apiWithIdentity as any).uploadBlob(audioBlobForUpload);
+    const audioCid = audioCidObj?.toString?.() ?? audioCidObj?.hash?.toString?.() ?? JSON.stringify(audioCidObj);
+    console.log(`[Archive] Audio CID: ${audioCid}`);
 
-    let audioCid = audioS5Path;
-    try {
-      const audioMeta = await fs.getMetadata(audioS5Path);
-      audioCid = (audioMeta as any)?.hash ?? (audioMeta as any)?.cid ?? audioS5Path;
-    } catch {
-      audioCid = audioS5Path;
-    }
-
-    // 3) Build and upload metadata JSON to S5
+    // 3) Build and upload metadata JSON blob to S5
     const metadataPayload = {
+      recording_id,
       ...metadata,
+      s5_audio_cid: audioCid,
       supabase_audio_url: audio_url,
       archived_at: new Date().toISOString(),
     };
-    const metadataS5Path = `recordings/${recording_id}/metadata.json`;
-    console.log(`[Archive] Uploading metadata to S5 at: ${metadataS5Path}`);
-    await fs.put(metadataS5Path, JSON.stringify(metadataPayload, null, 2), {
-      mimeType: "application/json",
-    });
-
-    let metadataCid = metadataS5Path;
-    try {
-      const metaMeta = await fs.getMetadata(metadataS5Path);
-      metadataCid = (metaMeta as any)?.hash ?? (metaMeta as any)?.cid ?? metadataS5Path;
-    } catch {
-      metadataCid = metadataS5Path;
-    }
-
-    console.log(`[Archive] Recording ${recording_id} archived. Audio CID: ${audioCid}, Metadata CID: ${metadataCid}`);
+    const metadataJson = JSON.stringify(metadataPayload, null, 2);
+    console.log(`[Archive] Uploading metadata blob to S5...`);
+    const metadataBlobForUpload = new Blob([metadataJson], { type: "application/json" });
+    const metadataCidObj = await (apiWithIdentity as any).uploadBlob(metadataBlobForUpload);
+    const metadataCid = metadataCidObj?.toString?.() ?? metadataCidObj?.hash?.toString?.() ?? JSON.stringify(metadataCidObj);
+    console.log(`[Archive] Metadata CID: ${metadataCid}`);
 
     // 4) Update the Supabase recordings row with both CIDs
-    const supabase = getSupabaseAdmin();
-    const { error: updateError } = await supabase
+    const supabase  = getSupabaseAdmin();
+    const archivedAt = new Date().toISOString();
+
+    // Try full update first (three columns)
+    let { error: updateError } = await supabase
       .from("recordings")
-      .update({
-        sia_cid: audioCid,
-        sia_metadata_cid: metadataCid,
-        sia_archived_at: new Date().toISOString(),
-      })
+      .update({ sia_cid: audioCid, sia_metadata_cid: metadataCid, sia_archived_at: archivedAt })
       .eq("id", recording_id);
+
+    // If sia_metadata_cid column is missing (migration not yet applied), fall back
+    if (updateError?.message?.includes("sia_metadata_cid")) {
+      console.warn("[Archive] sia_metadata_cid column not found — updating with two columns only");
+      ({ error: updateError } = await supabase
+        .from("recordings")
+        .update({ sia_cid: audioCid, sia_archived_at: archivedAt })
+        .eq("id", recording_id));
+    }
 
     if (updateError) {
       console.error("[Archive] Failed to update recording with CIDs:", updateError);
@@ -111,6 +106,7 @@ router.post("/archive", async (req: Request, res: Response) => {
       return;
     }
 
+    console.log(`[Archive] Recording ${recording_id} fully archived.`);
     res.json({ success: true, audio_cid: audioCid, metadata_cid: metadataCid });
   } catch (err: any) {
     console.error("[Archive] Error:", err?.message || err);

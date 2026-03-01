@@ -23,16 +23,30 @@ Chi Voice is a web app that helps users contribute to indigenous and minority la
 - Storage: Supabase Storage (`recordings` bucket, public read)
 - Edge Functions: Deno-based (generate-task, get-public-stats, upsert-language)
 
-## S5 / Sia Archival Flow
+## S5 / Sia Archival Flow  ✅ WORKING
 
 1. User records audio → uploaded to Supabase Storage (unchanged)
 2. Recording row inserted in Supabase DB
 3. Frontend calls `POST /api/archive` (fire-and-forget, non-blocking)
 4. Express server:
    - Downloads audio from Supabase public URL
-   - Uploads **audio file** to S5 at `recordings/{id}/audio.<ext>`
-   - Uploads **metadata JSON** to S5 at `recordings/{id}/metadata.json`
+   - Calls `apiWithIdentity.uploadBlob()` to upload audio directly to the S5 portal via HTTP
+   - Calls `apiWithIdentity.uploadBlob()` to upload metadata JSON to S5
    - Updates `recordings` row with `sia_cid`, `sia_metadata_cid`, `sia_archived_at`
+   - Falls back gracefully if `sia_metadata_cid` column is missing
+
+### S5 Init Strategy (important)
+- `buildIdentityFromBip39()` derives `S5UserIdentity` from 12-word BIP39 mnemonic using `mnemonicToEntropy` → Blake3 → `deriveHashInt` chain (bypasses SDK's 15-word-only validator)
+- `(node as any).registry.cachedOnlyMode = true` is kept **permanently** to prevent P2P registry lookups from triggering `downloadBlobAsBytes` infinite loops
+- Identity pack and portal auth tokens are persisted in `FileKvStore` (`.s5data/`) so registration only happens on first startup
+- S5 client is a lazy singleton — init happens on first `/api/archive` request, then cached
+
+### Pending Supabase Migration
+The `sia_metadata_cid TEXT` column needs to be applied via the Supabase dashboard SQL editor:
+```sql
+ALTER TABLE public.recordings ADD COLUMN IF NOT EXISTS sia_metadata_cid TEXT;
+```
+Until applied, the code falls back to updating only `sia_cid` and `sia_archived_at`.
 
 ## Database Schema (Supabase)
 - `profiles` — user profiles with display_name, points, total_recordings

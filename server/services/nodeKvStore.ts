@@ -15,7 +15,11 @@ function toKey(key: Uint8Array): string {
   return Buffer.from(key).toString("hex");
 }
 
-export class NodeKvStore {
+/**
+ * File-backed KV store — use for data that must survive restarts (auth tokens,
+ * identity packs). Writes are synchronous but infrequent.
+ */
+export class FileKvStore {
   private data: Record<string, number[]>;
   private file: string;
 
@@ -24,7 +28,7 @@ export class NodeKvStore {
     this.data = data;
   }
 
-  static open(name: string): NodeKvStore {
+  static open(name: string): FileKvStore {
     const file = storeFile(name);
     let data: Record<string, number[]> = {};
     if (existsSync(file)) {
@@ -34,7 +38,7 @@ export class NodeKvStore {
         data = {};
       }
     }
-    return new NodeKvStore(file, data);
+    return new FileKvStore(file, data);
   }
 
   private save() {
@@ -53,5 +57,29 @@ export class NodeKvStore {
 
   async contains(key: Uint8Array): Promise<boolean> {
     return toKey(key) in this.data;
+  }
+}
+
+/**
+ * In-memory KV store — use for volatile P2P data (registry entries, blob
+ * locations). Fast, no disk I/O, does not persist across restarts.
+ */
+export class MemoryKvStore {
+  private data = new Map<string, Uint8Array>();
+
+  static open(_name: string): MemoryKvStore {
+    return new MemoryKvStore();
+  }
+
+  async put(key: Uint8Array, value: Uint8Array): Promise<void> {
+    this.data.set(toKey(key), value instanceof Uint8Array ? value : new Uint8Array(value));
+  }
+
+  async get(key: Uint8Array): Promise<Uint8Array | undefined> {
+    return this.data.get(toKey(key));
+  }
+
+  async contains(key: Uint8Array): Promise<boolean> {
+    return this.data.has(toKey(key));
   }
 }
