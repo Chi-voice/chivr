@@ -13,12 +13,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import archiveRouter from "./routes/archive.js";
 
-import { existsSync } from "fs";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const IS_PROD = process.env.NODE_ENV === "production";
 const distDir = path.join(__dirname, "..", "dist");
-const IS_PROD = process.env.NODE_ENV === "production" || existsSync(path.join(distDir, "index.html"));
 const PORT = parseInt(process.env.PORT || (IS_PROD ? "5000" : "3001"), 10);
 
 app.use(cors({ origin: "*" }));
