@@ -28,11 +28,30 @@ serve(async (req) => {
   }
 
   try {
-    const { language_id, user_id } = await req.json();
+    const { language_id } = await req.json();
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // ── Auth: derive user_id from JWT, never trust request body ───────────
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const { data: { user: callerUser } } = await supabase.auth.getUser(
+      authHeader.replace('Bearer ', '')
+    );
+    if (!callerUser) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const user_id = callerUser.id;
 
     // ── Resolve language ───────────────────────────────────────────────────
     let languageDbId = language_id;
@@ -54,29 +73,6 @@ serve(async (req) => {
         langCheck = codeData;
         languageDbId = codeData.id;
       }
-    }
-
-    // ── Starter tasks ──────────────────────────────────────────────────────
-    const { data: starterTasks } = await supabase
-      .from('tasks')
-      .select(`id, sequence_order, recordings!recordings_task_id_fkey(id, user_id)`)
-      .eq('language_id', languageDbId)
-      .eq('is_starter_task', true)
-      .order('sequence_order');
-
-    const nextStarterTask = starterTasks?.find(task =>
-      !task.recordings?.some((r: any) => r.user_id === user_id)
-    );
-
-    if (nextStarterTask) {
-      return new Response(JSON.stringify({
-        error: 'Please complete the starter tasks first',
-        nextStarterTask: nextStarterTask.id,
-        message: 'You should complete the standardized starter tasks before generating new ones'
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
     }
 
     // ── Task count check ───────────────────────────────────────────────────
