@@ -99,8 +99,10 @@ async function requireApiKey(req: Request, res: Response, next: NextFunction) {
 
 router.get("/recordings", requireApiKey, async (req: Request, res: Response) => {
   const { language, language_code, type, date_from, date_to } = req.query;
-  const limit = Math.min(parseInt((req.query.limit as string) || "20", 10), 100);
-  const offset = parseInt((req.query.offset as string) || "0", 10);
+  const rawLimit = parseInt((req.query.limit as string) || "20", 10);
+  const rawOffset = parseInt((req.query.offset as string) || "0", 10);
+  const limit = Math.min(Math.max(isFinite(rawLimit) ? rawLimit : 20, 1), 100);
+  const offset = Math.max(isFinite(rawOffset) ? rawOffset : 0, 0);
 
   const supabase = getSupabaseAdmin();
 
