@@ -101,21 +101,36 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
+    // ── findOldestPendingTask: type-agnostic, deterministic ───────────────
+    // Returns the oldest task for this user+language that has no recording from
+    // this user. Searches across all task types (not filtered by currentSection)
+    // so that tasks generated before section logic was added are not missed.
+    // Uses two queries (tasks + recordings) to avoid relying on join behavior.
+    const findOldestPendingTask = async () => {
+      const { data: candidateTasks } = await supabase
+        .from('tasks')
+        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
+        .eq('language_id', languageDbId)
+        .order('created_at', { ascending: true }) // oldest first → deterministic
+        .limit(200);
+
+      if (!candidateTasks || candidateTasks.length === 0) return null;
+
+      const taskIds = candidateTasks.map(t => t.id);
+      const { data: userRecordings } = await supabase
+        .from('recordings')
+        .select('task_id')
+        .eq('user_id', user_id)
+        .in('task_id', taskIds);
+
+      const recordedSet = new Set((userRecordings ?? []).map((r: any) => r.task_id));
+      return candidateTasks.find(t => !recordedSet.has(t.id)) ?? null;
+    };
+
     // ── Gate: must complete current task before generating another ─────────
     if (taskCount && taskCount > 0 && !force) {
       if (progress && !progress.can_generate_next) {
-        // Try to surface the existing pending task for this section
-        const { data: recentOfType } = await supabase
-          .from('tasks')
-          .select(`id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey(id, user_id)`)
-          .eq('language_id', languageDbId)
-          .eq('type', currentSection)
-          .order('created_at', { ascending: false })
-          .limit(20);
-
-        const pending = recentOfType?.find(t =>
-          !t.recordings?.some((r: any) => r.user_id === user_id)
-        );
+        const pending = await findOldestPendingTask();
 
         if (pending) {
           return new Response(JSON.stringify({
@@ -144,17 +159,7 @@ serve(async (req) => {
     // ── One-task-at-a-time: return existing unrecorded task if found ────────
     // Even when can_generate_next=true, don't create a second pending task.
     if (!force) {
-      const { data: recentOfType } = await supabase
-        .from('tasks')
-        .select(`id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey(id, user_id)`)
-        .eq('language_id', languageDbId)
-        .eq('type', currentSection)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      const unrecorded = recentOfType?.find(t =>
-        !t.recordings?.some((r: any) => r.user_id === user_id)
-      );
+      const unrecorded = await findOldestPendingTask();
 
       if (unrecorded) {
         // Mark as pending so the gate blocks further generation
