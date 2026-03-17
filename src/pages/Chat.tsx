@@ -152,7 +152,7 @@ const Chat = () => {
     setGeneratingTask(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-task', {
-        body: { language_id: language.id, user_id: user.id },
+        body: { language_id: language.id },
       });
 
       if (error) throw error;
@@ -248,7 +248,7 @@ const Chat = () => {
     const { label, Icon, unlockText } = SECTION_CONFIG[type];
     const count   = sectionProgress[type];
     const pct     = Math.min(100, (count / SECTION_THRESHOLD) * 100);
-    const done    = count >= SECTION_THRESHOLD;
+    const done    = count >= SECTION_THRESHOLD && type !== currentSection;
     const locked  = type === 'phrase'
       ? sectionProgress.word < SECTION_THRESHOLD
       : type === 'sentence'
