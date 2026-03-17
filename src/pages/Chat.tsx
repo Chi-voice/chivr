@@ -145,12 +145,24 @@ const Chat = () => {
     setGeneratingTask(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-task', {
-        body: { language_id: language.id },
+        body: { language_id: language.id, user_id: user.id },
       });
 
-      if (error) throw error;
+      if (error) {
+        // FunctionsHttpError exposes the raw Response via error.context — read
+        // the actual JSON body from it to surface the real error message.
+        let errMsg: string = error.message;
+        try {
+          const body = await (error as { context?: Response }).context?.json();
+          errMsg = body?.error ?? body?.message ?? errMsg;
+        } catch { /* non-JSON body — fall back to error.message */ }
+        console.error('[generate-task] error:', { status: (error as { context?: Response }).context?.status, msg: errMsg, raw: error });
+        toast({ title: t('chat.toasts.errorGenTitle'), description: errMsg, variant: 'destructive' });
+        return;
+      }
 
       if (data?.error) {
+        console.warn('[generate-task] app-level error:', data);
         toast({ title: t('chat.toasts.taskGenTitle'), description: data.error, variant: 'destructive' });
         return;
       }
@@ -160,6 +172,7 @@ const Chat = () => {
       if (data?.section) setCurrentSection(data.section as TaskType);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error('[generate-task] unexpected error:', error);
       toast({ title: t('chat.toasts.errorGenTitle'), description: msg, variant: 'destructive' });
     } finally {
       setGeneratingTask(false);
