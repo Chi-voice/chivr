@@ -28,7 +28,7 @@ serve(async (req) => {
   }
 
   try {
-    const { language_id, user_id, force } = await req.json();
+    const { language_id, user_id } = await req.json();
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -101,32 +101,31 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
-    // ── Gate: must complete current task before generating another ─────────
-    if (taskCount && taskCount > 0 && !force) {
+    // Returns the oldest unrecorded task for this user+language via a LEFT JOIN
+    // anti-join. Type-agnostic: any pending task blocks generation regardless
+    // of type. Section typing applies only to new task generation below.
+    const findOldestPendingTask = async () => {
+      const { data } = await supabase
+        .from('tasks')
+        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)')
+        .eq('language_id', languageDbId)
+        .eq('recordings.user_id', user_id)
+        .is('recordings.id', null)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      return data ?? null;
+    };
+
+    // Gate: must record current task before generating a new one.
+    if (taskCount && taskCount > 0) {
       if (progress && !progress.can_generate_next) {
-        // Try to surface the existing pending task for this section
-        const { data: recentOfType } = await supabase
-          .from('tasks')
-          .select(`id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey(id, user_id)`)
-          .eq('language_id', languageDbId)
-          .eq('type', currentSection)
-          .order('created_at', { ascending: false })
-          .limit(20);
-
-        const pending = recentOfType?.find(t =>
-          !t.recordings?.some((r: any) => r.user_id === user_id)
-        );
-
+        const pending = await findOldestPendingTask();
         if (pending) {
-          return new Response(JSON.stringify({
-            task: pending,
-            section: currentSection,
-            section_progress,
-          }), {
+          return new Response(JSON.stringify({ task: pending, section: currentSection, section_progress }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-
         return new Response(JSON.stringify({
           error: 'Complete your current recording to unlock the next task',
           recordings_needed: 1,
@@ -136,42 +135,20 @@ serve(async (req) => {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
-      } else {
-        console.log('Force-generating next task for user', user_id, 'language', languageDbId);
       }
     }
 
-    // ── One-task-at-a-time: return existing unrecorded task if found ────────
-    // Even when can_generate_next=true, don't create a second pending task.
-    if (!force) {
-      const { data: recentOfType } = await supabase
-        .from('tasks')
-        .select(`id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey(id, user_id)`)
-        .eq('language_id', languageDbId)
-        .eq('type', currentSection)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      const unrecorded = recentOfType?.find(t =>
-        !t.recordings?.some((r: any) => r.user_id === user_id)
-      );
-
-      if (unrecorded) {
-        // Mark as pending so the gate blocks further generation
-        await supabase
-          .from('user_task_progress')
-          .update({ can_generate_next: false, updated_at: new Date().toISOString() })
-          .eq('user_id', user_id)
-          .eq('language_id', languageDbId);
-
-        return new Response(JSON.stringify({
-          task: unrecorded,
-          section: currentSection,
-          section_progress,
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
+    // One-task-at-a-time: return existing unrecorded task before generating another.
+    const unrecorded = await findOldestPendingTask();
+    if (unrecorded) {
+      await supabase
+        .from('user_task_progress')
+        .update({ can_generate_next: false, updated_at: new Date().toISOString() })
+        .eq('user_id', user_id)
+        .eq('language_id', languageDbId);
+      return new Response(JSON.stringify({ task: unrecorded, section: currentSection, section_progress }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // ── Resolve language name ──────────────────────────────────────────────
@@ -421,7 +398,7 @@ serve(async (req) => {
           { role: 'system', content: 'You are an expert in language learning and indigenous language preservation. Return only valid JSON objects.' },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.4,
+        temperature: 0.8,
         max_tokens: 200,
       }),
     });
