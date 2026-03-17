@@ -28,7 +28,7 @@ serve(async (req) => {
   }
 
   try {
-    const { language_id, user_id, force } = await req.json();
+    const { language_id, user_id } = await req.json();
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -101,54 +101,31 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
-    // ── findOldestPendingTask: DB-level anti-join, type-agnostic ─────────
-    // Returns the oldest task for this user+language that has no recording from
-    // this user, across ALL task types. Type-agnostic so that tasks from before
-    // section logic was added (or from section transitions) are never skipped.
-    //
-    // One-task-at-a-time: if ANY unrecorded task exists, it must be recorded
-    // before a new task can be generated. Section typing only applies to NEW
-    // task generation (randomType = currentSection), not to pending lookup.
-    //
-    // Equivalent SQL:
-    //   SELECT tasks.* FROM tasks
-    //   LEFT JOIN recordings r ON r.task_id = tasks.id AND r.user_id = ?
-    //   WHERE tasks.language_id = ? AND r.id IS NULL
-    //   ORDER BY tasks.created_at ASC LIMIT 1
+    // Returns the oldest unrecorded task for this user+language via a LEFT JOIN
+    // anti-join. Type-agnostic: any pending task blocks generation regardless
+    // of type. Section typing applies only to new task generation below.
     const findOldestPendingTask = async () => {
       const { data } = await supabase
         .from('tasks')
-        .select(
-          'id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)'
-        )
+        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)')
         .eq('language_id', languageDbId)
-        .eq('recordings.user_id', user_id)  // applied as JOIN ON condition, not WHERE
-        .is('recordings.id', null)           // anti-join: no matching recording from this user
+        .eq('recordings.user_id', user_id)
+        .is('recordings.id', null)
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
-
       return data ?? null;
     };
 
-    // ── Gate: must complete current task before generating another ─────────
-    // `force` is an ADMIN-ONLY escape hatch for seeding / testing purposes.
-    // It bypasses both the can_generate_next gate and the pending-task check.
-    // Normal client callers must never pass force=true.
-    if (taskCount && taskCount > 0 && !force) {
+    // Gate: must record current task before generating a new one.
+    if (taskCount && taskCount > 0) {
       if (progress && !progress.can_generate_next) {
         const pending = await findOldestPendingTask();
-
         if (pending) {
-          return new Response(JSON.stringify({
-            task: pending,
-            section: currentSection,
-            section_progress,
-          }), {
+          return new Response(JSON.stringify({ task: pending, section: currentSection, section_progress }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-
         return new Response(JSON.stringify({
           error: 'Complete your current recording to unlock the next task',
           recordings_needed: 1,
@@ -158,33 +135,20 @@ serve(async (req) => {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
-      } else {
-        console.log('Force-generating next task for user', user_id, 'language', languageDbId);
       }
     }
 
-    // ── One-task-at-a-time: return existing unrecorded task if found ────────
-    // Even when can_generate_next=true, don't create a second pending task.
-    // Skipped only when force=true (admin-only bypass — see gate comment above).
-    if (!force) {
-      const unrecorded = await findOldestPendingTask();
-
-      if (unrecorded) {
-        // Mark as pending so the gate blocks further generation
-        await supabase
-          .from('user_task_progress')
-          .update({ can_generate_next: false, updated_at: new Date().toISOString() })
-          .eq('user_id', user_id)
-          .eq('language_id', languageDbId);
-
-        return new Response(JSON.stringify({
-          task: unrecorded,
-          section: currentSection,
-          section_progress,
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
+    // One-task-at-a-time: return existing unrecorded task before generating another.
+    const unrecorded = await findOldestPendingTask();
+    if (unrecorded) {
+      await supabase
+        .from('user_task_progress')
+        .update({ can_generate_next: false, updated_at: new Date().toISOString() })
+        .eq('user_id', user_id)
+        .eq('language_id', languageDbId);
+      return new Response(JSON.stringify({ task: unrecorded, section: currentSection, section_progress }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // ── Resolve language name ──────────────────────────────────────────────
