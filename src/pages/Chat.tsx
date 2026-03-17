@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -23,13 +23,14 @@ import { useTranslation } from 'react-i18next';
 import { archiveToS5 } from '@/lib/s5Archive';
 
 type TaskType = 'word' | 'phrase' | 'sentence';
+type Difficulty = 'beginner' | 'intermediate' | 'advanced';
 
 interface Task {
   id: string;
   english_text: string;
   description: string;
   type: TaskType;
-  difficulty: string;
+  difficulty: Difficulty;
   estimated_time: number;
   language_id: string;
 }
@@ -61,7 +62,7 @@ const SECTION_CONFIG: Record<TaskType, { label: string; Icon: React.ElementType;
   sentence: { label: 'Sentences', Icon: MessageSquare, unlockText: 'Complete 1,000 Phrases to unlock' },
 };
 
-const DIFFICULTY_COLOR: Record<string, string> = {
+const DIFFICULTY_COLOR: Record<Difficulty, string> = {
   beginner:     'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
   intermediate: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   advanced:     'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
@@ -77,56 +78,48 @@ const Chat = () => {
   const [sectionProgress, setSectionProgress] = useState<SectionProgress>({ word: 0, phrase: 0, sentence: 0 });
   const [generatingTask, setGeneratingTask]   = useState(false);
   const [isRecordingModalOpen, setIsRecordingModalOpen] = useState(false);
-  const [totalRecordings, setTotalRecordings] = useState(0);
 
   const { toast } = useToast();
   const { t }     = useTranslation();
 
-  const currentSection = computeSection(sectionProgress);
+  const currentSection  = computeSection(sectionProgress);
+  const totalRecordings = sectionProgress.word + sectionProgress.phrase + sectionProgress.sentence;
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-      if (!user) navigate('/auth');
+    supabase.auth.getUser().then(({ data: { user: u } }) => {
+      setUser(u);
+      if (!u) navigate('/auth');
     });
   }, [navigate]);
 
-  // ── Load language, then generate initial task ─────────────────────────────
   useEffect(() => {
     if (languageId && user) loadLanguage();
   }, [languageId, user]);
 
   useEffect(() => {
-    if (language && user) {
-      loadSectionProgress();
-      generateNextTask();
-    }
+    if (language && user) generateNextTask();
   }, [language, user]);
 
-  // ── Language resolution (same logic as before) ────────────────────────────
   const loadLanguage = async () => {
     if (!languageId) return;
-
     const isValidUUID = (s: string) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
-
     try {
-      let data: any = null;
+      let resolved: Language | null = null;
 
       if (isValidUUID(languageId)) {
-        const { data: byId, error } = await supabase.from('languages').select('*').eq('id', languageId).maybeSingle();
+        const { data, error } = await supabase.from('languages').select('id, name, code').eq('id', languageId).maybeSingle();
         if (error) throw error;
-        if (byId) data = byId;
+        if (data) resolved = data as Language;
       }
 
-      if (!data) {
-        const { data: byCode, error } = await supabase.from('languages').select('*').eq('code', languageId).maybeSingle();
+      if (!resolved) {
+        const { data, error } = await supabase.from('languages').select('id, name, code').eq('code', languageId).maybeSingle();
         if (error) throw error;
-        if (byCode) data = byCode;
+        if (data) resolved = data as Language;
       }
 
-      if (!data) {
+      if (!resolved) {
         const { getGlottologLanguages } = await import('@/utils/glottologParser');
         const gl = await getGlottologLanguages();
         const glottologLang = gl.find(l => l.id === languageId);
@@ -137,45 +130,23 @@ const Chat = () => {
         });
         if (ensureError) throw ensureError;
 
-        data = ensured?.language ?? ensured;
-        if (!data?.id) {
-          const { data: inserted } = await supabase.from('languages').select('*').eq('code', glottologLang.id).maybeSingle();
-          data = inserted;
+        const candidate = (ensured?.language ?? ensured) as Language | null;
+        if (candidate?.id) {
+          resolved = candidate;
+        } else {
+          const { data } = await supabase.from('languages').select('id, name, code').eq('code', glottologLang.id).maybeSingle();
+          if (data) resolved = data as Language;
         }
       }
 
-      if (!data) throw new Error('Failed to resolve language');
-      setLanguage(data);
-    } catch (error: any) {
-      toast({ title: t('chat.toasts.errorLoadLangTitle'), description: error.message, variant: 'destructive' });
+      if (!resolved) throw new Error('Failed to resolve language');
+      setLanguage(resolved);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      toast({ title: t('chat.toasts.errorLoadLangTitle'), description: msg, variant: 'destructive' });
     }
   };
 
-  // ── Load section progress from DB (for initial display before first task loads) ──
-  const loadSectionProgress = async () => {
-    if (!user || !language) return;
-    try {
-      const { data } = await supabase
-        .from('user_task_progress')
-        .select('word_recordings_count, phrase_recordings_count, sentence_recordings_count, recordings_count')
-        .eq('user_id', user.id)
-        .eq('language_id', language.id)
-        .maybeSingle();
-
-      if (data) {
-        setSectionProgress({
-          word:     (data as any).word_recordings_count     ?? 0,
-          phrase:   (data as any).phrase_recordings_count   ?? 0,
-          sentence: (data as any).sentence_recordings_count ?? 0,
-        });
-        setTotalRecordings((data as any).recordings_count ?? 0);
-      }
-    } catch (e) {
-      console.warn('Failed to load section progress', e);
-    }
-  };
-
-  // ── Generate (or retrieve) current task ───────────────────────────────────
   const generateNextTask = async () => {
     if (!language || !user) return;
     setGeneratingTask(true);
@@ -191,20 +162,16 @@ const Chat = () => {
         return;
       }
 
-      if (data?.task) {
-        setCurrentTask(data.task as Task);
-      }
-      if (data?.section_progress) {
-        setSectionProgress(data.section_progress as SectionProgress);
-      }
-    } catch (error: any) {
-      toast({ title: t('chat.toasts.errorGenTitle'), description: error.message, variant: 'destructive' });
+      if (data?.task) setCurrentTask(data.task as Task);
+      if (data?.section_progress) setSectionProgress(data.section_progress as SectionProgress);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      toast({ title: t('chat.toasts.errorGenTitle'), description: msg, variant: 'destructive' });
     } finally {
       setGeneratingTask(false);
     }
   };
 
-  // ── Submit recording (mechanics unchanged) ────────────────────────────────
   const handleSubmitRecording = async (taskId: string, audioBlob: Blob, notes?: string) => {
     if (!user || !currentTask) return;
 
@@ -241,7 +208,6 @@ const Chat = () => {
         .single();
       if (insertError) throw insertError;
 
-      // Archive to Sia via S5 (fire-and-forget)
       archiveToS5({
         recording_id: insertedRecording.id,
         audio_url: audioUrl,
@@ -263,37 +229,32 @@ const Chat = () => {
         else console.log('[S5] Archived — audio CID:', r.audio_cid, 'metadata CID:', r.metadata_cid);
       });
 
-      // Optimistically increment the current section counter
       setSectionProgress(prev => ({
         ...prev,
-        [currentTask.type]: prev[currentTask.type as keyof SectionProgress] + 1,
+        [currentTask.type]: prev[currentTask.type] + 1,
       }));
-      setTotalRecordings(n => n + 1);
 
       toast({ title: t('chat.toasts.saveSuccessTitle'), description: t('chat.toasts.saveSuccessDesc') });
-
-      // Immediately fetch the next task
       await generateNextTask();
-    } catch (error: any) {
-      toast({ title: t('chat.toasts.errorSaveTitle'), description: error.message, variant: 'destructive' });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      toast({ title: t('chat.toasts.errorSaveTitle'), description: msg, variant: 'destructive' });
     } finally {
       setIsRecordingModalOpen(false);
-      setCurrentTask(prev => prev);
     }
   };
 
-  // ── Section panel component ───────────────────────────────────────────────
   const SectionPanel = ({ type }: { type: TaskType }) => {
     const { label, Icon, unlockText } = SECTION_CONFIG[type];
-    const count  = sectionProgress[type];
-    const pct    = Math.min(100, (count / SECTION_THRESHOLD) * 100);
-    const done   = count >= SECTION_THRESHOLD;
-    const locked = type === 'phrase'
+    const count   = sectionProgress[type];
+    const pct     = Math.min(100, (count / SECTION_THRESHOLD) * 100);
+    const done    = count >= SECTION_THRESHOLD;
+    const locked  = type === 'phrase'
       ? sectionProgress.word < SECTION_THRESHOLD
       : type === 'sentence'
         ? sectionProgress.phrase < SECTION_THRESHOLD
         : false;
-    const active = !locked && !done;
+    const active    = !locked && !done;
     const isCurrent = type === currentSection;
 
     return (
@@ -338,11 +299,9 @@ const Chat = () => {
     );
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-screen bg-background" data-testid="chat-page">
 
-      {/* Header */}
       <div className="bg-card border-b border-border px-4 py-3 flex items-center gap-3">
         <Button
           variant="ghost"
@@ -362,14 +321,12 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* Section progress panels */}
       <div className="p-3 grid grid-cols-3 gap-2 border-b border-border bg-card/50">
         <SectionPanel type="word" />
         <SectionPanel type="phrase" />
         <SectionPanel type="sentence" />
       </div>
 
-      {/* Current task area */}
       <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
 
         {generatingTask ? (
@@ -386,7 +343,7 @@ const Chat = () => {
                   {currentTask.type}
                 </Badge>
                 <Badge
-                  className={`text-xs capitalize ${DIFFICULTY_COLOR[currentTask.difficulty] ?? ''}`}
+                  className={`text-xs capitalize ${DIFFICULTY_COLOR[currentTask.difficulty]}`}
                   data-testid="badge-difficulty"
                 >
                   {currentTask.difficulty}
@@ -433,7 +390,6 @@ const Chat = () => {
           </div>
         )}
 
-        {/* Section context hint */}
         {!generatingTask && currentTask && (
           <p className="text-xs text-muted-foreground text-center max-w-xs" data-testid="text-section-hint">
             {currentSection === 'word' && sectionProgress.word < SECTION_THRESHOLD
@@ -447,7 +403,6 @@ const Chat = () => {
         )}
       </div>
 
-      {/* Recording Modal */}
       <RecordingModal
         isOpen={isRecordingModalOpen}
         onClose={() => setIsRecordingModalOpen(false)}
@@ -456,7 +411,7 @@ const Chat = () => {
           type:          currentTask.type,
           englishText:   currentTask.english_text,
           description:   currentTask.description,
-          difficulty:    currentTask.difficulty as any,
+          difficulty:    currentTask.difficulty,
           estimatedTime: currentTask.estimated_time,
           sequenceOrder: 0,
           isStarterTask: false,
