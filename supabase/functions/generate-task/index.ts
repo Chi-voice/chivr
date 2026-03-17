@@ -101,15 +101,19 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
-    // ── findOldestPendingTask: DB-level anti-join, section-filtered ───────
-    // Finds the oldest unrecorded task of the user's current section using a
-    // PostgREST LEFT JOIN anti-join. Only tasks matching currentSection are
-    // considered, ensuring the returned task always matches the user's section.
+    // ── findOldestPendingTask: DB-level anti-join, type-agnostic ─────────
+    // Returns the oldest task for this user+language that has no recording from
+    // this user, across ALL task types. Type-agnostic so that tasks from before
+    // section logic was added (or from section transitions) are never skipped.
+    //
+    // One-task-at-a-time: if ANY unrecorded task exists, it must be recorded
+    // before a new task can be generated. Section typing only applies to NEW
+    // task generation (randomType = currentSection), not to pending lookup.
     //
     // Equivalent SQL:
     //   SELECT tasks.* FROM tasks
     //   LEFT JOIN recordings r ON r.task_id = tasks.id AND r.user_id = ?
-    //   WHERE tasks.language_id = ? AND tasks.type = ? AND r.id IS NULL
+    //   WHERE tasks.language_id = ? AND r.id IS NULL
     //   ORDER BY tasks.created_at ASC LIMIT 1
     const findOldestPendingTask = async () => {
       const { data } = await supabase
@@ -118,9 +122,8 @@ serve(async (req) => {
           'id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)'
         )
         .eq('language_id', languageDbId)
-        .eq('type', currentSection)         // section-aware: only match current section type
         .eq('recordings.user_id', user_id)  // applied as JOIN ON condition, not WHERE
-        .is('recordings.id', null)           // anti-join: no matching recording found
+        .is('recordings.id', null)           // anti-join: no matching recording from this user
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
@@ -129,6 +132,9 @@ serve(async (req) => {
     };
 
     // ── Gate: must complete current task before generating another ─────────
+    // `force` is an ADMIN-ONLY escape hatch for seeding / testing purposes.
+    // It bypasses both the can_generate_next gate and the pending-task check.
+    // Normal client callers must never pass force=true.
     if (taskCount && taskCount > 0 && !force) {
       if (progress && !progress.can_generate_next) {
         const pending = await findOldestPendingTask();
@@ -159,6 +165,7 @@ serve(async (req) => {
 
     // ── One-task-at-a-time: return existing unrecorded task if found ────────
     // Even when can_generate_next=true, don't create a second pending task.
+    // Skipped only when force=true (admin-only bypass — see gate comment above).
     if (!force) {
       const unrecorded = await findOldestPendingTask();
 
