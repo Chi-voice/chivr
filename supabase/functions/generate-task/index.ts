@@ -101,30 +101,31 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
-    // ── findOldestPendingTask: type-agnostic, deterministic ───────────────
-    // Returns the oldest task for this user+language that has no recording from
-    // this user. Searches across all task types (not filtered by currentSection)
-    // so that tasks generated before section logic was added are not missed.
-    // Uses two queries (tasks + recordings) to avoid relying on join behavior.
+    // ── findOldestPendingTask: DB-level anti-join, type-agnostic ─────────
+    // Uses a PostgREST LEFT JOIN with the join condition filtered by user_id.
+    // Tasks where the joined recording row is NULL have no recording from this
+    // user. Returns the single oldest such task — deterministic, no cap on rows
+    // scanned, covers all task types regardless of section.
+    //
+    // Equivalent SQL:
+    //   SELECT tasks.* FROM tasks
+    //   LEFT JOIN recordings r ON r.task_id = tasks.id AND r.user_id = ?
+    //   WHERE tasks.language_id = ? AND r.id IS NULL
+    //   ORDER BY tasks.created_at ASC LIMIT 1
     const findOldestPendingTask = async () => {
-      const { data: candidateTasks } = await supabase
+      const { data } = await supabase
         .from('tasks')
-        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
+        .select(
+          'id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)'
+        )
         .eq('language_id', languageDbId)
-        .order('created_at', { ascending: true }) // oldest first → deterministic
-        .limit(200);
+        .eq('recordings.user_id', user_id) // applied as JOIN ON condition, not WHERE
+        .is('recordings.id', null)          // anti-join: no matching recording found
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
-      if (!candidateTasks || candidateTasks.length === 0) return null;
-
-      const taskIds = candidateTasks.map(t => t.id);
-      const { data: userRecordings } = await supabase
-        .from('recordings')
-        .select('task_id')
-        .eq('user_id', user_id)
-        .in('task_id', taskIds);
-
-      const recordedSet = new Set((userRecordings ?? []).map((r: any) => r.task_id));
-      return candidateTasks.find(t => !recordedSet.has(t.id)) ?? null;
+      return data ?? null;
     };
 
     // ── Gate: must complete current task before generating another ─────────
