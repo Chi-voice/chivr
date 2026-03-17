@@ -1,0 +1,21 @@
+root@ubuntu-s-2vcpu-2gb-90gb-intel-lon1-01:~/chi-node# docker logs chi-caddy --tail 20
+{"level":"info","ts":1773746513.8008645,"msg":"adapted config to JSON","adapter":"caddyfile"}
+{"level":"warn","ts":1773746513.8009582,"msg":"Caddyfile input is not formatted; run 'caddy fmt --overwrite' to fix inconsistencies","adapter":"caddyfile","file":"/etc/caddy/Caddyfile","line":2}
+{"level":"info","ts":1773746513.8025258,"logger":"admin","msg":"admin endpoint started","address":"localhost:2019","enforce_origin":false,"origins":["//localhost:2019","//[::1]:2019","//127.0.0.1:2019"]}
+{"level":"info","ts":1773746513.8033118,"logger":"tls.cache.maintenance","msg":"started background certificate maintenance","cache":"0x2d457fe7c80"}
+{"level":"info","ts":1773746513.803514,"logger":"http.auto_https","msg":"server is listening only on the HTTPS port but has no TLS connection policies; adding one to enable TLS","server_name":"srv0","https_port":443}
+{"level":"info","ts":1773746513.8036366,"logger":"http.auto_https","msg":"enabling automatic HTTP->HTTPS redirects","server_name":"srv0"}
+{"level":"info","ts":1773746513.804871,"logger":"http","msg":"enabling HTTP/3 listener","addr":":443"}
+{"level":"info","ts":1773746513.8050785,"msg":"failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB). See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes for details."}
+{"level":"info","ts":1773746513.8052375,"logger":"http.log","msg":"server running","name":"srv0","protocols":["h1","h2","h3"]}
+{"level":"warn","ts":1773746513.8055804,"logger":"http","msg":"HTTP/2 skipped because it requires TLS","network":"tcp","addr":":5052"}
+{"level":"warn","ts":1773746513.8055944,"logger":"http","msg":"HTTP/3 skipped because it requires TLS","network":"tcp","addr":":5052"}
+{"level":"info","ts":1773746513.8055975,"logger":"http.log","msg":"server running","name":"srv1","protocols":["h1","h2","h3"]}
+{"level":"warn","ts":1773746513.8058884,"logger":"http","msg":"HTTP/2 skipped because it requires TLS","network":"tcp","addr":":80"}
+{"level":"warn","ts":1773746513.8059013,"logger":"http","msg":"HTTP/3 skipped because it requires TLS","network":"tcp","addr":":80"}
+{"level":"info","ts":1773746513.8059046,"logger":"http.log","msg":"server running","name":"remaining_auto_https_redirects","protocols":["h1","h2","h3"]}
+{"level":"info","ts":1773746513.8059106,"logger":"http","msg":"enabling automatic TLS certificate management","domains":["chivr-app.com"]}
+{"level":"info","ts":1773746513.8073785,"msg":"autosaved config (load with --resume flag)","file":"/config/caddy/autosave.json"}
+{"level":"info","ts":1773746513.807403,"msg":"serving initial configuration"}
+{"level":"info","ts":1773746513.8097136,"logger":"tls","msg":"storage cleaning happened too recently; skipping for now","storage":"FileStorage:/data/caddy","instance":"5d9d7b20-e539-48e9-8fcb-62f6bb152b2a","try_again":1773832913.809712,"try_again_in":86399.999999518}
+{"level":"info","ts":1773746513.8098943,"logger":"tls","msg":"finished cleaning storage units"
