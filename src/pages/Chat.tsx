@@ -176,12 +176,12 @@ const Chat = () => {
   };
 
   // ── Generate (or retrieve) current task ───────────────────────────────────
-  const generateNextTask = async (force = false) => {
+  const generateNextTask = async () => {
     if (!language || !user) return;
     setGeneratingTask(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-task', {
-        body: { language_id: language.id, user_id: user.id, force },
+        body: { language_id: language.id, user_id: user.id },
       });
 
       if (error) throw error;
@@ -273,7 +273,7 @@ const Chat = () => {
       toast({ title: t('chat.toasts.saveSuccessTitle'), description: t('chat.toasts.saveSuccessDesc') });
 
       // Immediately fetch the next task
-      await generateNextTask(true);
+      await generateNextTask();
     } catch (error: any) {
       toast({ title: t('chat.toasts.errorSaveTitle'), description: error.message, variant: 'destructive' });
     } finally {
@@ -424,7 +424,7 @@ const Chat = () => {
           <div className="text-center text-muted-foreground" data-testid="task-empty">
             <p className="text-sm">No task available. Tap below to generate one.</p>
             <Button
-              onClick={() => generateNextTask(true)}
+              onClick={() => generateNextTask()}
               className="mt-4 bg-earth-primary hover:bg-earth-primary/90"
               data-testid="button-generate-task"
             >
