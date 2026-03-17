@@ -97,14 +97,14 @@ serve(async (req) => {
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
-    // Returns the oldest unrecorded task for this user+language via a LEFT JOIN
-    // anti-join. Type-agnostic: any pending task blocks generation regardless
-    // of type. Section typing applies only to new task generation below.
+    // Returns the oldest unrecorded task for this user+language in the current section.
+    // Gating by type ensures locked sections are never surfaced as pending work.
     const findOldestPendingTask = async () => {
       const { data } = await supabase
         .from('tasks')
         .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)')
         .eq('language_id', languageDbId)
+        .eq('type', currentSection)
         .eq('recordings.user_id', user_id)
         .is('recordings.id', null)
         .order('created_at', { ascending: true })
@@ -224,11 +224,11 @@ serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(200);
 
-    const usedTexts = new Set((recentTasks ?? []).map((t: any) => (t.english_text ?? '').trim().toLowerCase()));
+    const usedTexts = new Set((recentTasks ?? []).map(({ english_text }) => (english_text ?? '').trim().toLowerCase()));
     const usedWords = (recentTasks ?? [])
-      .map((t: any) => (t.english_text ?? '').trim())
-      .filter((txt: string) => txt && !txt.includes(' '))
-      .map((txt: string) => txt.toLowerCase());
+      .map(({ english_text }) => (english_text ?? '').trim())
+      .filter((txt) => txt && !txt.includes(' '))
+      .map((txt) => txt.toLowerCase());
 
     const avoidList  = Array.from(usedTexts).slice(0, 20);
     const avoidWords = usedWords.slice(0, 20);
@@ -289,14 +289,14 @@ serve(async (req) => {
       ];
       const places    = ['market','school','river','farm','village','clinic','bus station','store','house'];
       const times     = ['this morning','this afternoon','this evening','tomorrow','next week'];
-      const sentences = [
-        (pl: string, tm: string) => `I am going to the ${pl} ${tm}.`,
-        (pl: string) => `My house is near the ${pl}.`,
-        (pl: string) => `We will meet at the ${pl} tomorrow.`,
-        (pl: string) => `The road to the ${pl} is very long.`,
-        (pl: string) => `She is working at the ${pl} today.`,
-        (pl: string) => `He is walking to the ${pl} now.`,
-        (pl: string) => `They are waiting at the ${pl}.`,
+      const sentences: ((pl: string, tm?: string) => string)[] = [
+        (pl, tm) => `I am going to the ${pl} ${tm}.`,
+        (pl) => `My house is near the ${pl}.`,
+        (pl) => `We will meet at the ${pl} tomorrow.`,
+        (pl) => `The road to the ${pl} is very long.`,
+        (pl) => `She is working at the ${pl} today.`,
+        (pl) => `He is walking to the ${pl} now.`,
+        (pl) => `They are waiting at the ${pl}.`,
       ];
 
       let candidate = { text: '', description: '', estimated: 2 } as { text: string; description: string; estimated: number };
@@ -315,7 +315,7 @@ serve(async (req) => {
       } else {
         const pl   = places[Math.floor(Math.random() * places.length)];
         const tm   = times[Math.floor(Math.random() * times.length)];
-        const text = sentences[Math.floor(Math.random() * sentences.length)](pl, tm as any);
+        const text = sentences[Math.floor(Math.random() * sentences.length)](pl, tm);
         candidate.text = text;
         candidate.description = `Translate this practical sentence into ${language.name}.`;
         candidate.estimated = 3;
