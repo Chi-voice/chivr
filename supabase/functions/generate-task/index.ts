@@ -98,18 +98,35 @@ serve(async (req) => {
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
     // Returns the oldest unrecorded task for this user+language in the current section.
-    // Gating by type ensures locked sections are never surfaced as pending work.
+    // Uses a two-step approach to avoid fragile PostgREST embedded-join FK name issues:
+    //   1. Fetch all task IDs this user has already recorded (for this language).
+    //   2. Query tasks excluding those IDs, filtered to the current section.
     const findOldestPendingTask = async () => {
-      const { data } = await supabase
+      // Step 1: task IDs already recorded by this user for this language
+      const { data: recordedRows } = await supabase
+        .from('recordings')
+        .select('task_id')
+        .eq('user_id', user_id)
+        .not('task_id', 'is', null);
+
+      const recordedIds: string[] = (recordedRows ?? [])
+        .map((r: { task_id: string | null }) => r.task_id)
+        .filter((id): id is string => !!id);
+
+      // Step 2: oldest task in the current section not yet recorded by this user
+      let query = supabase
         .from('tasks')
-        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at, recordings!recordings_task_id_fkey!left(id, user_id)')
+        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
         .eq('language_id', languageDbId)
         .eq('type', currentSection)
-        .eq('recordings.user_id', user_id)
-        .is('recordings.id', null)
         .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
+        .limit(1);
+
+      if (recordedIds.length > 0) {
+        query = query.not('id', 'in', `(${recordedIds.join(',')})`);
+      }
+
+      const { data } = await query.maybeSingle();
       return data ?? null;
     };
 

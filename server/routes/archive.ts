@@ -42,13 +42,17 @@ router.post("/archive", async (req: Request, res: Response) => {
   try {
     const { apiWithIdentity } = await getS5Client();
 
-    // 1) Download audio from Supabase Storage (public URL)
-    console.log(`[Archive] Downloading audio for recording ${recording_id}...`);
-    const audioRes = await fetch(audio_url);
-    if (!audioRes.ok) {
-      throw new Error(`Failed to download audio: HTTP ${audioRes.status}`);
+    // 1) Download audio from Supabase Storage using the admin client
+    // (avoids 400/403 errors when the bucket is not public)
+    console.log(`[Archive] Downloading audio for recording ${recording_id} (path: ${file_path})...`);
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+      .from("recordings")
+      .download(file_path);
+    if (downloadError || !fileData) {
+      throw new Error(`Failed to download audio from storage: ${downloadError?.message ?? "no data"}`);
     }
-    const audioBuffer = await audioRes.arrayBuffer();
+    const audioBuffer = await fileData.arrayBuffer();
     const ext = (file_path.split(".").pop() || "webm").toLowerCase();
     const mimeType =
       ext === "m4a" ? "audio/mp4" :
