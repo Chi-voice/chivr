@@ -49,13 +49,6 @@ interface SectionProgress {
 
 const SECTION_THRESHOLD = 1000;
 
-function computeSection(sp: SectionProgress): TaskType {
-  if (sp.word < SECTION_THRESHOLD) return 'word';
-  if (sp.phrase < SECTION_THRESHOLD) return 'phrase';
-  if (sp.sentence < SECTION_THRESHOLD) return 'sentence';
-  return 'word';
-}
-
 const SECTION_CONFIG: Record<TaskType, { label: string; Icon: React.ElementType; unlockText: string }> = {
   word:     { label: 'Words',     Icon: BookOpen,      unlockText: '' },
   phrase:   { label: 'Phrases',   Icon: AlignLeft,     unlockText: 'Complete 1,000 Words to unlock' },
@@ -76,13 +69,13 @@ const Chat = () => {
   const [language, setLanguage]               = useState<Language | null>(null);
   const [currentTask, setCurrentTask]         = useState<Task | null>(null);
   const [sectionProgress, setSectionProgress] = useState<SectionProgress>({ word: 0, phrase: 0, sentence: 0 });
+  const [currentSection, setCurrentSection]   = useState<TaskType>('word');
   const [generatingTask, setGeneratingTask]   = useState(false);
   const [isRecordingModalOpen, setIsRecordingModalOpen] = useState(false);
 
   const { toast } = useToast();
   const { t }     = useTranslation();
 
-  const currentSection  = computeSection(sectionProgress);
   const totalRecordings = sectionProgress.word + sectionProgress.phrase + sectionProgress.sentence;
 
   useEffect(() => {
@@ -164,6 +157,7 @@ const Chat = () => {
 
       if (data?.task) setCurrentTask(data.task as Task);
       if (data?.section_progress) setSectionProgress(data.section_progress as SectionProgress);
+      if (data?.section) setCurrentSection(data.section as TaskType);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       toast({ title: t('chat.toasts.errorGenTitle'), description: msg, variant: 'destructive' });
