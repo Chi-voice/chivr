@@ -5,6 +5,31 @@ import { randomBytes } from "crypto";
 const router = Router();
 const FREE_QUOTA = 1000;
 
+interface ApiKeyRow {
+  id: string;
+  user_id: string;
+  key: string;
+  tier: string;
+  monthly_usage: number;
+  usage_reset_at: string;
+  created_at: string;
+}
+
+interface RecordingRow {
+  id: string;
+  sia_cid: string | null;
+  notes: string | null;
+  created_at: string;
+  tasks: {
+    english_text: string;
+    type: string;
+    languages: {
+      name: string;
+      code: string;
+    };
+  } | null;
+}
+
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -12,52 +37,62 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+async function resetUsageIfNeeded(supabase: ReturnType<typeof getSupabaseAdmin>, keyRow: ApiKeyRow): Promise<ApiKeyRow> {
+  const now = new Date();
+  if (new Date(keyRow.usage_reset_at) > now) return keyRow;
+
+  const nextReset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const { data, error } = await supabase
+    .from("api_keys")
+    .update({ monthly_usage: 0, usage_reset_at: nextReset.toISOString() })
+    .eq("id", keyRow.id)
+    .select()
+    .single();
+
+  if (error || !data) return { ...keyRow, monthly_usage: 0, usage_reset_at: nextReset.toISOString() };
+  return data as ApiKeyRow;
+}
+
 async function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKey = req.headers["x-api-key"] as string | undefined;
   if (!apiKey) {
-    res.status(401).json({ error: "Missing X-API-Key header. Generate a key at /api/v1/keys." });
+    res.status(401).json({ error: "Missing X-API-Key header. Generate a key at POST /api/v1/keys." });
     return;
   }
 
   const supabase = getSupabaseAdmin();
-  const { data: keyRow, error } = await supabase
+  const { data, error } = await supabase
     .from("api_keys")
     .select("*")
     .eq("key", apiKey)
     .maybeSingle();
 
-  if (error || !keyRow) {
+  if (error || !data) {
     res.status(401).json({ error: "Invalid API key" });
     return;
   }
 
-  const now = new Date();
-  let usage = keyRow.monthly_usage as number;
+  let keyRow = data as ApiKeyRow;
+  keyRow = await resetUsageIfNeeded(supabase, keyRow);
 
-  if (new Date(keyRow.usage_reset_at) <= now) {
-    const nextReset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    await supabase
-      .from("api_keys")
-      .update({ monthly_usage: 0, usage_reset_at: nextReset.toISOString() })
-      .eq("id", keyRow.id);
-    usage = 0;
-  }
-
-  if (keyRow.tier === "free" && usage >= FREE_QUOTA) {
+  if (keyRow.tier === "free" && keyRow.monthly_usage >= FREE_QUOTA) {
     res.status(429).json({
       error: "Monthly quota exceeded",
       quota: FREE_QUOTA,
-      usage,
+      usage: keyRow.monthly_usage,
       reset_at: keyRow.usage_reset_at,
     });
     return;
   }
 
-  supabase
+  const { error: updateError } = await supabase
     .from("api_keys")
-    .update({ monthly_usage: usage + 1 })
-    .eq("id", keyRow.id)
-    .then();
+    .update({ monthly_usage: keyRow.monthly_usage + 1 })
+    .eq("id", keyRow.id);
+
+  if (updateError) {
+    console.error("[PublicAPI] Failed to increment usage counter:", updateError.message);
+  }
 
   next();
 }
@@ -113,7 +148,8 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
     return;
   }
 
-  const results = (data || []).map((r: any) => ({
+  const rows = (data || []) as RecordingRow[];
+  const results = rows.map((r) => ({
     language: r.tasks?.languages?.name ?? null,
     language_code: r.tasks?.languages?.code ?? null,
     prompt: r.tasks?.english_text ?? null,
@@ -154,12 +190,13 @@ router.post("/keys", async (req: Request, res: Response) => {
     .maybeSingle();
 
   if (existing) {
+    const keyRow = await resetUsageIfNeeded(supabase, existing as ApiKeyRow);
     res.json({
-      key: existing.key,
-      tier: existing.tier,
-      monthly_usage: existing.monthly_usage,
-      quota: existing.tier === "free" ? FREE_QUOTA : null,
-      usage_reset_at: existing.usage_reset_at,
+      key: keyRow.key,
+      tier: keyRow.tier,
+      monthly_usage: keyRow.monthly_usage,
+      quota: keyRow.tier === "free" ? FREE_QUOTA : null,
+      usage_reset_at: keyRow.usage_reset_at,
     });
     return;
   }
@@ -187,12 +224,13 @@ router.post("/keys", async (req: Request, res: Response) => {
     return;
   }
 
+  const keyRow = newKey as ApiKeyRow;
   res.status(201).json({
-    key: newKey.key,
-    tier: newKey.tier,
+    key: keyRow.key,
+    tier: keyRow.tier,
     monthly_usage: 0,
     quota: FREE_QUOTA,
-    usage_reset_at: newKey.usage_reset_at,
+    usage_reset_at: keyRow.usage_reset_at,
   });
 });
 
@@ -202,16 +240,18 @@ router.get("/keys/me", async (req: Request, res: Response) => {
 
   const supabase = getSupabaseAdmin();
 
-  const { data: keyRow } = await supabase
+  const { data } = await supabase
     .from("api_keys")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (!keyRow) {
+  if (!data) {
     res.status(404).json({ error: "No API key found. POST /api/v1/keys to generate one." });
     return;
   }
+
+  const keyRow = await resetUsageIfNeeded(supabase, data as ApiKeyRow);
 
   res.json({
     key: keyRow.key,
