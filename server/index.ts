@@ -12,6 +12,7 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import archiveRouter from "./routes/archive.js";
+import publicApiRouter from "./routes/publicApi.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -27,6 +28,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", archiveRouter);
+app.use("/api/v1", publicApiRouter);
 
 // In production, serve the Vite-built frontend from dist/
 if (IS_PROD) {

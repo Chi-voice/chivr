@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { 
+import { Progress } from '@/components/ui/progress';
+import {
   User,
   Trophy,
   Mic,
@@ -15,7 +16,15 @@ import {
   Award,
   Clock,
   Target,
-  Copy
+  Copy,
+  Code2,
+  Key,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -38,6 +47,16 @@ interface UserStats {
   currentLevel: string;
 }
 
+interface ApiKeyInfo {
+  key: string;
+  tier: string;
+  monthly_usage: number;
+  quota: number | null;
+  usage_reset_at: string;
+}
+
+const FREE_QUOTA = 1000;
+
 const Profile = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<SupabaseUser | null>(null);
@@ -46,6 +65,12 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const { t } = useTranslation();
+
+  const [apiKeyInfo, setApiKeyInfo] = useState<ApiKeyInfo | null>(null);
+  const [apiKeyLoading, setApiKeyLoading] = useState(false);
+  const [apiKeyGenerating, setApiKeyGenerating] = useState(false);
+  const [apiSectionOpen, setApiSectionOpen] = useState(false);
+  const [keyVisible, setKeyVisible] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -88,7 +113,6 @@ const Profile = () => {
     if (!user) return;
 
     try {
-      // Get unique languages recorded
       const { data: languageData } = await supabase
         .from('recordings')
         .select(`
@@ -107,7 +131,6 @@ const Profile = () => {
         (sum, r) => sum + (r.tasks.estimated_time || 0), 0
       ) || 0;
 
-      // Calculate level based on points
       const points = profile?.points || 0;
       let currentLevel = 'Beginner';
       if (points >= 1000) currentLevel = 'Expert';
@@ -117,13 +140,68 @@ const Profile = () => {
       setStats({
         totalLanguages: uniqueLanguages.size,
         totalMinutes,
-        longestStreak: 7, // Placeholder for now
+        longestStreak: 7,
         currentLevel
       });
     } catch (error: any) {
       console.error('Error loading stats:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadApiKey = async () => {
+    if (!user) return;
+    setApiKeyLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch('/api/v1/keys/me', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeyInfo(data);
+      } else if (res.status === 404) {
+        setApiKeyInfo(null);
+      }
+    } catch (e) {
+      console.error('Error loading API key:', e);
+    } finally {
+      setApiKeyLoading(false);
+    }
+  };
+
+  const handleApiSectionToggle = () => {
+    const next = !apiSectionOpen;
+    setApiSectionOpen(next);
+    if (next && apiKeyInfo === null && !apiKeyLoading) {
+      loadApiKey();
+    }
+  };
+
+  const handleGenerateKey = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setApiKeyGenerating(true);
+    try {
+      const res = await fetch('/api/v1/keys', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeyInfo(data);
+        setKeyVisible(true);
+        toast({ title: 'API key generated', description: 'Copy it now — you can always retrieve it here.' });
+      } else {
+        const err = await res.json();
+        toast({ title: 'Error', description: err.error, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setApiKeyGenerating(false);
     }
   };
 
@@ -146,7 +224,19 @@ const Profile = () => {
     }
   };
 
+  const maskKey = (key: string) => {
+    if (!key) return '';
+    return key.slice(0, 8) + '••••••••••••••••' + key.slice(-4);
+  };
+
+  const copyToClipboard = (text: string, label = 'Copied') => {
+    navigator.clipboard.writeText(text);
+    toast({ title: label });
+  };
+
   const referralLink = `${window.location.origin}/?ref=${user?.id || ''}`;
+  const usagePct = apiKeyInfo?.quota ? Math.min(100, (apiKeyInfo.monthly_usage / apiKeyInfo.quota) * 100) : 0;
+  const resetDate = apiKeyInfo?.usage_reset_at ? new Date(apiKeyInfo.usage_reset_at).toLocaleDateString() : '';
 
   if (loading) {
     return (
@@ -185,7 +275,7 @@ const Profile = () => {
                   </Badge>
                   <div className="flex items-center space-x-1 text-sm text-muted-foreground">
                     <Trophy className="w-4 h-4" />
-                  <span>{profile?.points || 0} {t('profile.points')}</span>
+                    <span>{profile?.points || 0} {t('profile.points')}</span>
                   </div>
                 </div>
               </div>
@@ -230,6 +320,116 @@ const Profile = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Developer API */}
+        <Card className="mb-6">
+          <CardHeader
+            className="cursor-pointer select-none"
+            onClick={handleApiSectionToggle}
+            data-testid="button-developer-api-toggle"
+          >
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5" />
+                <span>Developer API</span>
+              </div>
+              {apiSectionOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </CardTitle>
+          </CardHeader>
+
+          {apiSectionOpen && (
+            <CardContent className="space-y-4">
+              {apiKeyLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading key info…
+                </div>
+              ) : apiKeyInfo ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="capitalize">{apiKeyInfo.tier} tier</Badge>
+                    <span className="text-xs text-muted-foreground">Resets {resetDate}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-7 px-2"
+                      onClick={loadApiKey}
+                      data-testid="button-api-key-refresh"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </Button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Monthly usage</span>
+                      <span>{apiKeyInfo.monthly_usage} / {apiKeyInfo.quota ?? '∞'} requests</span>
+                    </div>
+                    {apiKeyInfo.quota && (
+                      <Progress value={usagePct} className="h-2" data-testid="progress-api-usage" />
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 relative">
+                      <Input
+                        readOnly
+                        value={keyVisible ? apiKeyInfo.key : maskKey(apiKeyInfo.key)}
+                        className="font-mono text-xs pr-10"
+                        data-testid="input-api-key"
+                      />
+                      <button
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => setKeyVisible(v => !v)}
+                        data-testid="button-toggle-key-visibility"
+                      >
+                        {keyVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(apiKeyInfo.key, 'API key copied')}
+                      data-testid="button-copy-api-key"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="bg-muted rounded-md p-3">
+                    <p className="text-xs font-medium mb-1 text-muted-foreground">Example request</p>
+                    <code className="text-xs break-all">
+                      {`curl https://chivr-app.com/api/v1/recordings \\\n  -H "X-API-Key: ${keyVisible ? apiKeyInfo.key : maskKey(apiKeyInfo.key)}"`}
+                    </code>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Access the Chi Voice public dataset programmatically. Free tier includes {FREE_QUOTA.toLocaleString()} requests/month.
+                  </p>
+                  <Button
+                    onClick={handleGenerateKey}
+                    disabled={apiKeyGenerating}
+                    className="w-full"
+                    data-testid="button-generate-api-key"
+                  >
+                    {apiKeyGenerating ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating…</>
+                    ) : (
+                      <><Key className="w-4 h-4 mr-2" /> Generate API Key</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              <div className="pt-2 border-t text-xs text-muted-foreground space-y-1">
+                <p><span className="font-medium">GET /api/v1/recordings</span> — Browse archived voice recordings</p>
+                <p>Query params: <code>language_code</code>, <code>language</code>, <code>type</code>, <code>limit</code>, <code>offset</code></p>
+              </div>
+            </CardContent>
+          )}
+        </Card>
 
         {/* Referral */}
         <Card className="mb-6">
