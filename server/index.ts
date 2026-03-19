@@ -10,6 +10,7 @@ if (typeof globalThis.WebSocket === "undefined") {
 import express from "express";
 import cors from "cors";
 import archiveRouter from "./routes/archive.js";
+import publicApiRouter from "./routes/publicApi.js";
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
@@ -22,6 +23,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", archiveRouter);
+app.use("/api/v1", publicApiRouter);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[Server] API server running on port ${PORT}`);
