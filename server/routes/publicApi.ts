@@ -18,6 +18,7 @@ interface ApiKeyRow {
 interface RecordingRow {
   id: string;
   sia_cid: string | null;
+  audio_url: string | null;
   notes: string | null;
   created_at: string;
   tasks: {
@@ -28,6 +29,18 @@ interface RecordingRow {
       code: string;
     };
   } | null;
+}
+
+/**
+ * Extract the storage object path from a Supabase Storage public URL.
+ * Input:  https://<project>.supabase.co/storage/v1/object/public/recordings/<path>
+ * Output: <path>
+ */
+function extractStoragePath(audioUrl: string): string | null {
+  const marker = "/object/public/recordings/";
+  const idx = audioUrl.indexOf(marker);
+  if (idx === -1) return null;
+  return audioUrl.slice(idx + marker.length);
 }
 
 function getSupabaseAdmin() {
@@ -111,6 +124,7 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
     .select(`
       id,
       sia_cid,
+      audio_url,
       notes,
       created_at,
       tasks!inner(
@@ -151,15 +165,43 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
   }
 
   const rows = (data || []) as RecordingRow[];
-  const results = rows.map((r) => ({
-    language: r.tasks?.languages?.name ?? null,
-    language_code: r.tasks?.languages?.code ?? null,
-    prompt: r.tasks?.english_text ?? null,
-    type: r.tasks?.type ?? null,
-    cid: r.sia_cid ? `sia://${r.sia_cid}` : null,
-    recording_text: r.notes ?? null,
-    created_at: r.created_at,
-  }));
+
+  // Batch-generate signed URLs (1-hour expiry) for all rows that have an audio_url.
+  // This lets API consumers download audio over plain HTTPS without needing Supabase
+  // credentials, regardless of whether the storage bucket is public or private.
+  const storagePaths = rows
+    .map((r) => (r.audio_url ? extractStoragePath(r.audio_url) : null))
+    .filter((p): p is string => p !== null);
+
+  const signedUrlMap = new Map<string, string>();
+
+  if (storagePaths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("recordings")
+      .createSignedUrls(storagePaths, 3600);
+
+    for (const entry of signed ?? []) {
+      if (entry.path && entry.signedUrl) {
+        signedUrlMap.set(entry.path, entry.signedUrl);
+      }
+    }
+  }
+
+  const results = rows.map((r) => {
+    const storagePath = r.audio_url ? extractStoragePath(r.audio_url) : null;
+    const audioUrl = storagePath ? (signedUrlMap.get(storagePath) ?? null) : null;
+
+    return {
+      language: r.tasks?.languages?.name ?? null,
+      language_code: r.tasks?.languages?.code ?? null,
+      prompt: r.tasks?.english_text ?? null,
+      type: r.tasks?.type ?? null,
+      cid: r.sia_cid ? `sia://${r.sia_cid}` : null,
+      audio_url: audioUrl,
+      recording_text: r.notes ?? null,
+      created_at: r.created_at,
+    };
+  });
 
   res.json({ data: results, limit, offset, count: results.length });
 });
