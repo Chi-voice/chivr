@@ -18,6 +18,7 @@ interface ApiKeyRow {
 interface RecordingRow {
   id: string;
   sia_cid: string | null;
+  audio_url: string | null;
   notes: string | null;
   created_at: string;
   tasks: {
@@ -28,6 +29,13 @@ interface RecordingRow {
       code: string;
     };
   } | null;
+}
+
+function extractStoragePath(audioUrl: string | null): string | null {
+  if (!audioUrl) return null;
+  const marker = "/recordings/";
+  const idx = audioUrl.indexOf(marker);
+  return idx === -1 ? null : audioUrl.slice(idx + marker.length);
 }
 
 function getSupabaseAdmin() {
@@ -111,6 +119,7 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
     .select(`
       id,
       sia_cid,
+      audio_url,
       notes,
       created_at,
       tasks!inner(
@@ -151,15 +160,40 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
   }
 
   const rows = (data || []) as RecordingRow[];
-  const results = rows.map((r) => ({
-    language: r.tasks?.languages?.name ?? null,
-    language_code: r.tasks?.languages?.code ?? null,
-    prompt: r.tasks?.english_text ?? null,
-    type: r.tasks?.type ?? null,
-    cid: r.sia_cid ? `sia://${r.sia_cid}` : null,
-    recording_text: r.notes ?? null,
-    created_at: r.created_at,
-  }));
+
+  // Extract storage paths from the stored audio_url column, then batch-generate
+  // signed URLs (1-hour expiry) so API consumers can play audio without needing
+  // S5 infrastructure or Supabase credentials.
+  const storagePaths = rows
+    .map((r) => extractStoragePath(r.audio_url))
+    .filter(Boolean) as string[];
+  const signedUrlMap = new Map<string, string>();
+  if (storagePaths.length > 0) {
+    const { data: signedData } = await supabase.storage
+      .from("recordings")
+      .createSignedUrls(storagePaths, 3600);
+    if (signedData) {
+      for (const entry of signedData) {
+        if (entry.path && entry.signedUrl) {
+          signedUrlMap.set(entry.path, entry.signedUrl);
+        }
+      }
+    }
+  }
+
+  const results = rows.map((r) => {
+    const storagePath = extractStoragePath(r.audio_url);
+    return {
+      language: r.tasks?.languages?.name ?? null,
+      language_code: r.tasks?.languages?.code ?? null,
+      prompt: r.tasks?.english_text ?? null,
+      type: r.tasks?.type ?? null,
+      cid: r.sia_cid ? `sia://${r.sia_cid}` : null,
+      audio_url: storagePath ? (signedUrlMap.get(storagePath) ?? null) : null,
+      recording_text: r.notes ?? null,
+      created_at: r.created_at,
+    };
+  });
 
   res.json({ data: results, limit, offset, count: results.length });
 });
