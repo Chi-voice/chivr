@@ -35,7 +35,10 @@ function extractStoragePath(audioUrl: string | null): string | null {
   if (!audioUrl) return null;
   const marker = "/recordings/";
   const idx = audioUrl.indexOf(marker);
-  return idx === -1 ? null : audioUrl.slice(idx + marker.length);
+  if (idx === -1) return null;
+  const raw = audioUrl.slice(idx + marker.length);
+  // Strip query string or fragment that may appear on pre-signed legacy URLs
+  return raw.split("?")[0].split("#")[0] || null;
 }
 
 function getSupabaseAdmin() {
@@ -169,9 +172,13 @@ router.get("/recordings", requireApiKey, async (req: Request, res: Response) => 
     .filter(Boolean) as string[];
   const signedUrlMap = new Map<string, string>();
   if (storagePaths.length > 0) {
-    const { data: signedData } = await supabase.storage
+    const uniquePaths = [...new Set(storagePaths)];
+    const { data: signedData, error: signError } = await supabase.storage
       .from("recordings")
-      .createSignedUrls(storagePaths, 3600);
+      .createSignedUrls(uniquePaths, 3600);
+    if (signError) {
+      console.error("[PublicAPI] createSignedUrls error:", signError.message);
+    }
     if (signedData) {
       for (const entry of signedData) {
         if (entry.path && entry.signedUrl) {
