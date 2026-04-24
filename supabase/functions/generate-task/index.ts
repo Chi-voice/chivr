@@ -81,8 +81,18 @@ serve(async (req) => {
       .select('*', { count: 'exact', head: true })
       .eq('language_id', languageDbId);
 
+    // ── Fetch all recorded task IDs for this user (used for both count healing and pending-task lookup) ──
+    const { data: allRecordedRows } = await supabase
+      .from('recordings')
+      .select('task_id')
+      .eq('user_id', user_id)
+      .not('task_id', 'is', null);
+
+    const allRecordedIds: string[] = (allRecordedRows ?? [])
+      .map((r: { task_id: string | null }) => r.task_id)
+      .filter((id): id is string => !!id);
+
     // ── Section progress ───────────────────────────────────────────────────
-    // Read per-type counters alongside the gate flag
     const { data: progress } = await supabase
       .from('user_task_progress')
       .select('can_generate_next, recordings_count, word_recordings_count, phrase_recordings_count, sentence_recordings_count')
@@ -90,30 +100,50 @@ serve(async (req) => {
       .eq('language_id', languageDbId)
       .maybeSingle();
 
-    const wordCount     = progress?.word_recordings_count     ?? 0;
-    const phraseCount   = progress?.phrase_recordings_count   ?? 0;
-    const sentenceCount = progress?.sentence_recordings_count ?? 0;
+    let wordCount     = progress?.word_recordings_count     ?? 0;
+    let phraseCount   = progress?.phrase_recordings_count   ?? 0;
+    let sentenceCount = progress?.sentence_recordings_count ?? 0;
+
+    // Self-heal: if total recordings exist but all per-type counters are zero,
+    // the columns are stale (recorded before the section-progress migration ran).
+    // Recompute accurate counts from actual recordings joined to tasks.
+    const storedTotal = progress?.recordings_count ?? 0;
+    const countersStale = storedTotal > 0 && wordCount === 0 && phraseCount === 0 && sentenceCount === 0;
+    if (countersStale && allRecordedIds.length > 0) {
+      const { data: taskTypeRows } = await supabase
+        .from('tasks')
+        .select('id, type')
+        .eq('language_id', languageDbId)
+        .in('id', allRecordedIds);
+
+      for (const t of (taskTypeRows ?? [])) {
+        if (t.type === 'word')     wordCount++;
+        else if (t.type === 'phrase')   phraseCount++;
+        else if (t.type === 'sentence') sentenceCount++;
+      }
+
+      // Persist the corrected counts and unblock the gate so the user isn't stuck
+      await supabase
+        .from('user_task_progress')
+        .update({
+          word_recordings_count:     wordCount,
+          phrase_recordings_count:   phraseCount,
+          sentence_recordings_count: sentenceCount,
+          can_generate_next:         true,
+          updated_at:                new Date().toISOString(),
+        })
+        .eq('user_id', user_id)
+        .eq('language_id', languageDbId);
+
+      console.log('[heal] Backfilled stale counters for user', user_id, '— word:', wordCount, 'phrase:', phraseCount, 'sentence:', sentenceCount);
+    }
 
     const section_progress = { word: wordCount, phrase: phraseCount, sentence: sentenceCount };
     const currentSection   = computeSection(wordCount, phraseCount, sentenceCount);
 
     // Returns the oldest unrecorded task for this user+language in the current section.
-    // Uses a two-step approach to avoid fragile PostgREST embedded-join FK name issues:
-    //   1. Fetch all task IDs this user has already recorded (for this language).
-    //   2. Query tasks excluding those IDs, filtered to the current section.
+    // Reuses the already-fetched allRecordedIds to avoid a second recordings query.
     const findOldestPendingTask = async () => {
-      // Step 1: task IDs already recorded by this user for this language
-      const { data: recordedRows } = await supabase
-        .from('recordings')
-        .select('task_id')
-        .eq('user_id', user_id)
-        .not('task_id', 'is', null);
-
-      const recordedIds: string[] = (recordedRows ?? [])
-        .map((r: { task_id: string | null }) => r.task_id)
-        .filter((id): id is string => !!id);
-
-      // Step 2: oldest task in the current section not yet recorded by this user
       let query = supabase
         .from('tasks')
         .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
@@ -122,8 +152,8 @@ serve(async (req) => {
         .order('created_at', { ascending: true })
         .limit(1);
 
-      if (recordedIds.length > 0) {
-        query = query.not('id', 'in', `(${recordedIds.join(',')})`);
+      if (allRecordedIds.length > 0) {
+        query = query.not('id', 'in', `(${allRecordedIds.join(',')})`);
       }
 
       const { data } = await query.maybeSingle();
@@ -131,24 +161,24 @@ serve(async (req) => {
     };
 
     // Gate: must record current task before generating a new one.
-    if (taskCount && taskCount > 0) {
-      if (progress && !progress.can_generate_next) {
-        const pending = await findOldestPendingTask();
-        if (pending) {
-          return new Response(JSON.stringify({ task: pending, section: currentSection, section_progress }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        return new Response(JSON.stringify({
-          error: 'Complete your current recording to unlock the next task',
-          recordings_needed: 1,
-          section: currentSection,
-          section_progress,
-        }), {
-          status: 400,
+    // Exception: if all available tasks in the current section are already recorded,
+    // fall through to generate a fresh task rather than blocking the user forever.
+    const gateBlocking = !countersStale && taskCount && taskCount > 0 && progress && !progress.can_generate_next;
+    if (gateBlocking) {
+      const pending = await findOldestPendingTask();
+      if (pending) {
+        return new Response(JSON.stringify({ task: pending, section: currentSection, section_progress }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      // No pending task found — user has recorded everything available in this section.
+      // Reset the gate and fall through to generate a new task below.
+      await supabase
+        .from('user_task_progress')
+        .update({ can_generate_next: true, updated_at: new Date().toISOString() })
+        .eq('user_id', user_id)
+        .eq('language_id', languageDbId);
+      console.log('[gate-reset] No pending task in section', currentSection, '— resetting gate for user', user_id);
     }
 
     // One-task-at-a-time: return existing unrecorded task before generating another.
