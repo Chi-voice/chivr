@@ -402,8 +402,35 @@ serve(async (req) => {
 
     console.log('Generating', randomType, 'task (section:', currentSection, ') for language:', language.name);
 
-    // Helper: save a task and reset the progress gate
+    // Helper: save a task and reset the progress gate.
+    // Deduplication: if an identical (language, type, english_text) task already exists
+    // and the user hasn't recorded it yet, return that existing task instead of inserting
+    // a duplicate. This prevents the fallback loop from stacking up identical words.
     const saveTask = async (taskData: { english_text: string; description: string; estimated_time: number }, createdByAi: boolean) => {
+      const normalizedText = taskData.english_text.trim().toLowerCase();
+
+      // Check for existing unrecorded task with the same text
+      const { data: existing } = await supabase
+        .from('tasks')
+        .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
+        .eq('language_id', language.id)
+        .eq('type', randomType)
+        .ilike('english_text', normalizedText)
+        .not('id', 'in', allRecordedIds.length > 0 ? `(${allRecordedIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        console.log('Dedup: returning existing task instead of inserting duplicate:', existing.id, existing.english_text);
+        await supabase
+          .from('user_task_progress')
+          .update({ can_generate_next: false, updated_at: new Date().toISOString() })
+          .eq('user_id', user_id)
+          .eq('language_id', language.id);
+        return existing;
+      }
+
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
