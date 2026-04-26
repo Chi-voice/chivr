@@ -375,10 +375,16 @@ serve(async (req) => {
         const c = makeFallbackCandidate(type);
         if (!isTooSimilar(c.text) && isNatural(c.text, type)) return c;
       }
-      const final = makeFallbackCandidate('phrase');
-      return isNatural(final.text, 'phrase')
-        ? final
-        : { text: 'Thank you very much.', description: `Translate this everyday expression into ${language.name}.`, estimated: 2 };
+      // Last resort: type-safe hardcoded defaults — never cross type boundaries.
+      if (type === 'word') {
+        const safeWords = ['morning', 'river', 'bread', 'village', 'music', 'market', 'doctor', 'evening'];
+        const w = safeWords.find(w => !usedTexts.has(w)) ?? 'morning';
+        return { text: w, description: `Translate the word "${w}" into ${language.name}.`, estimated: 1 };
+      }
+      if (type === 'phrase') {
+        return { text: 'Thank you very much.', description: `Translate this everyday expression into ${language.name}.`, estimated: 2 };
+      }
+      return { text: 'I would like some water.', description: `Translate this practical sentence into ${language.name}.`, estimated: 3 };
     };
 
     // ── AI prompt ──────────────────────────────────────────────────────────
