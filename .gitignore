@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# S5/Sia SDK auth cache — contains derived private keys; never commit
+.s5data/
