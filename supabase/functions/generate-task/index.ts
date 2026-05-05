@@ -160,6 +160,116 @@ serve(async (req) => {
       return data ?? null;
     };
 
+    // ── Proactive task seeding ─────────────────────────────────────────────
+    // When fewer than SEED_THRESHOLD unrecorded tasks remain in the current section,
+    // silently generate a fresh batch in the background so the pool never runs dry.
+    const SEED_THRESHOLD = 5;
+    const SEED_BATCH_SIZE = 8;
+
+    const countUnrecordedInSection = async (): Promise<number> => {
+      let countQuery = supabase
+        .from('tasks')
+        .select('*', { count: 'exact', head: true })
+        .eq('language_id', languageDbId)
+        .eq('type', currentSection);
+
+      if (allRecordedIds.length > 0) {
+        countQuery = countQuery.not('id', 'in', `(${allRecordedIds.join(',')})`);
+      }
+
+      const { count } = await countQuery;
+      return count ?? 0;
+    };
+
+    const maybeSeedInBackground = (remaining: number) => {
+      if (remaining >= SEED_THRESHOLD) return;
+      const seedOpenAIKey = Deno.env.get('OPENAI_API_KEY');
+      if (!seedOpenAIKey || !langCheck) return;
+      console.log(`[seed] ${remaining} unrecorded ${currentSection} tasks remain — seeding batch of ${SEED_BATCH_SIZE} for ${langCheck.name}`);
+
+      const seedWork = (async () => {
+        const { data: latestTasks } = await supabase
+          .from('tasks')
+          .select('english_text')
+          .eq('language_id', languageDbId)
+          .eq('type', currentSection)
+          .order('created_at', { ascending: false })
+          .limit(300);
+
+        const latestUsedTexts = new Set(
+          (latestTasks ?? []).map(({ english_text }: { english_text: string | null }) => (english_text ?? '').trim().toLowerCase())
+        );
+        const seededTexts: string[] = [];
+        const seedDifficulties = ['beginner', 'intermediate', 'advanced'];
+        const langName = langCheck!.name;
+
+        for (let i = 0; i < SEED_BATCH_SIZE; i++) {
+          try {
+            const diff = seedDifficulties[i % 3];
+            const avoidListForSeed = [...Array.from(latestUsedTexts), ...seededTexts].slice(0, 200).join(', ');
+            const seedPrompt = `Generate a ${diff} level English ${currentSection} for everyday conversation practice in ${langName}. It must sound natural and be commonly used in daily life. Keep it short and clear. Words: one token; Phrases: 2–8 words; Sentences: 4–14 words ending with punctuation. Avoid these already used items: ${avoidListForSeed}. Return only valid JSON: {"english_text": string, "description": string, "estimated_time": number}`;
+
+            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${seedOpenAIKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: 'You are an expert in language learning. Return only valid JSON objects.' },
+                  { role: 'user', content: seedPrompt },
+                ],
+                temperature: 0.9,
+                max_tokens: 200,
+                response_format: { type: 'json_object' },
+              }),
+            });
+
+            if (!resp.ok) { console.warn(`[seed] OpenAI error on item ${i + 1}:`, resp.status); continue; }
+
+            const respData = await resp.json();
+            const seedContent = cleanJson(respData.choices?.[0]?.message?.content ?? '');
+            const seedParsed = JSON.parse(seedContent);
+            const seedText = (seedParsed?.english_text ?? '').trim();
+
+            if (
+              !seedText ||
+              !isNatural(seedText, currentSection) ||
+              latestUsedTexts.has(seedText.toLowerCase()) ||
+              seededTexts.includes(seedText.toLowerCase())
+            ) {
+              console.warn(`[seed] Skipping invalid/duplicate: "${seedText}"`);
+              continue;
+            }
+
+            const { error: insertErr } = await supabase.from('tasks').insert({
+              english_text: seedText,
+              description: seedParsed.description ?? `Translate into ${langName}.`,
+              type: currentSection,
+              difficulty: diff,
+              language_id: languageDbId,
+              estimated_time: Math.min(5, Math.max(1, Number(seedParsed.estimated_time) || 2)),
+              created_by_ai: true,
+              is_starter_task: false,
+            });
+
+            if (!insertErr) {
+              latestUsedTexts.add(seedText.toLowerCase());
+              seededTexts.push(seedText.toLowerCase());
+              console.log(`[seed] Added "${seedText}" (${diff} ${currentSection})`);
+            } else if (insertErr.code !== '23505') {
+              console.error('[seed] Insert error:', insertErr);
+            }
+          } catch (seedErr) {
+            console.error(`[seed] Error on item ${i + 1}:`, seedErr);
+          }
+        }
+
+        console.log(`[seed] Done: ${seededTexts.length}/${SEED_BATCH_SIZE} ${currentSection} tasks seeded for ${langName}`);
+      })();
+
+      EdgeRuntime.waitUntil(seedWork);
+    };
+
     // Gate: must record current task before generating a new one.
     // Exception: if all available tasks in the current section are already recorded,
     // fall through to generate a fresh task rather than blocking the user forever.
@@ -184,11 +294,17 @@ serve(async (req) => {
     // One-task-at-a-time: return existing unrecorded task before generating another.
     const unrecorded = await findOldestPendingTask();
     if (unrecorded) {
-      await supabase
-        .from('user_task_progress')
-        .update({ can_generate_next: false, updated_at: new Date().toISOString() })
-        .eq('user_id', user_id)
-        .eq('language_id', languageDbId);
+      // Run progress update and pool-count check in parallel so we don't add latency.
+      const [, remaining] = await Promise.all([
+        supabase
+          .from('user_task_progress')
+          .update({ can_generate_next: false, updated_at: new Date().toISOString() })
+          .eq('user_id', user_id)
+          .eq('language_id', languageDbId),
+        countUnrecordedInSection(),
+      ]);
+      // remaining includes the task being served; once recorded, pool shrinks by 1.
+      maybeSeedInBackground(remaining - 1);
       return new Response(JSON.stringify({ task: unrecorded, section: currentSection, section_progress }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -277,11 +393,22 @@ serve(async (req) => {
       .filter((txt) => txt && !txt.includes(' '))
       .map((txt) => txt.toLowerCase());
 
-    const avoidList  = Array.from(usedTexts).slice(0, 20);
-    const avoidWords = usedWords.slice(0, 20);
+    // Send the full usedTexts list (capped at 150) so OpenAI always generates
+    // something genuinely novel even when many tasks already exist for the language.
+    const avoidList  = Array.from(usedTexts).slice(0, 150);
+    const avoidWords = usedWords.slice(0, 150);
 
     const avoidance      = avoidList.length ? ` Avoid these already used items: ${avoidList.join(', ')}.` : '';
     const avoidanceWords = (randomType === 'word' && avoidWords.length) ? ` Do not use any of these words: ${avoidWords.join(', ')}.` : '';
+
+    // Strip markdown code fences that some LLM responses include around JSON.
+    const cleanJson = (raw: string): string => {
+      const s = raw.trim();
+      if (s.startsWith('```')) {
+        return s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      }
+      return s;
+    };
 
     const tokenize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
     const jaccard = (a: string, b: string) => {
@@ -403,32 +530,43 @@ serve(async (req) => {
     console.log('Generating', randomType, 'task (section:', currentSection, ') for language:', language.name);
 
     // Helper: save a task and reset the progress gate.
-    // Deduplication: if an identical (language, type, english_text) task already exists
-    // and the user hasn't recorded it yet, return that existing task instead of inserting
-    // a duplicate. This prevents the fallback loop from stacking up identical words.
-    const saveTask = async (taskData: { english_text: string; description: string; estimated_time: number }, createdByAi: boolean) => {
+    // saveTask returns:
+    //   task object  — success (new or existing unrecorded task)
+    //   'RECORDED'   — text already recorded by this user; caller should retry with different text
+    //   null         — unexpected DB error
+    const saveTask = async (
+      taskData: { english_text: string; description: string; estimated_time: number },
+      createdByAi: boolean
+    ): Promise<Record<string, unknown> | 'RECORDED' | null> => {
       const normalizedText = taskData.english_text.trim().toLowerCase();
 
-      // Check for existing unrecorded task with the same text
-      const { data: existing } = await supabase
+      // Check for ANY existing task with this text (recorded or not) so we never
+      // attempt an INSERT that would violate the unique index on (language_id, type, lower(english_text)).
+      const { data: anyExisting } = await supabase
         .from('tasks')
         .select('id, english_text, description, type, difficulty, language_id, estimated_time, created_by_ai, created_at')
         .eq('language_id', language.id)
         .eq('type', randomType)
         .ilike('english_text', normalizedText)
-        .not('id', 'in', allRecordedIds.length > 0 ? `(${allRecordedIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (existing) {
-        console.log('Dedup: returning existing task instead of inserting duplicate:', existing.id, existing.english_text);
+      if (anyExisting) {
+        const alreadyRecorded = allRecordedIds.includes(anyExisting.id);
+        if (alreadyRecorded) {
+          // User has already done this task — tell the caller to try a different text.
+          console.log('Dedup: text already recorded by user, signalling retry:', anyExisting.id, anyExisting.english_text);
+          return 'RECORDED';
+        }
+        // Existing task the user hasn't recorded yet — hand it back directly.
+        console.log('Dedup: returning existing unrecorded task:', anyExisting.id, anyExisting.english_text);
         await supabase
           .from('user_task_progress')
           .update({ can_generate_next: false, updated_at: new Date().toISOString() })
           .eq('user_id', user_id)
           .eq('language_id', language.id);
-        return existing;
+        return anyExisting as Record<string, unknown>;
       }
 
       const { data: newTask, error: taskError } = await supabase
@@ -447,6 +585,11 @@ serve(async (req) => {
         .single();
 
       if (taskError) {
+        // Race-condition: another request inserted the same text between our check and INSERT.
+        if (taskError.code === '23505') {
+          console.log('Unique constraint race on insert — signalling retry');
+          return 'RECORDED';
+        }
         console.error('Database error:', taskError);
         return null;
       }
@@ -458,7 +601,65 @@ serve(async (req) => {
         .eq('user_id', user_id)
         .eq('language_id', language.id);
 
-      return newTask;
+      return newTask as Record<string, unknown>;
+    };
+
+    // Wrapper: if saveTask signals the text is already recorded, pick fresh fallback
+    // candidates and retry up to 5 times. If those all fail (user has recorded every
+    // common fallback too), make one final direct OpenAI call with an exhaustive
+    // avoidance list and high temperature to guarantee a novel task is generated.
+    const saveTaskWithRetry = async (
+      initial: { english_text: string; description: string; estimated_time: number },
+      createdByAi: boolean
+    ) => {
+      let result = await saveTask(initial, createdByAi);
+      if (result !== 'RECORDED') return result;
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const alt = pickUniqueFallback(randomType);
+        console.log(`saveTask retry ${attempt + 1}: trying "${alt.text}"`);
+        result = await saveTask({ english_text: alt.text, description: alt.description, estimated_time: alt.estimated }, false);
+        if (result !== 'RECORDED') return result;
+      }
+
+      // Last resort: all standard fallbacks exhausted. Make up to 3 direct OpenAI
+      // calls with a full avoidance list and high temperature. Use json_object mode
+      // to guarantee parseable output with no code fences.
+      console.log('saveTaskWithRetry: standard fallbacks exhausted — attempting rescue OpenAI calls');
+      const fullAvoidList = Array.from(usedTexts).slice(0, 200).join(', ');
+      for (let rescueAttempt = 0; rescueAttempt < 3; rescueAttempt++) {
+        try {
+          const rescuePrompt = `Generate a completely original English ${randomType} for everyday language learning in ${language.name}. Be creative and use real vocabulary. MUST NOT match any of these: ${fullAvoidList}. Return JSON with keys english_text, description, estimated_time.`;
+          const rescueResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${openAIApiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [
+                { role: 'system', content: 'You are a language learning expert. Output only valid JSON.' },
+                { role: 'user', content: rescuePrompt },
+              ],
+              temperature: 1.0,
+              max_tokens: 200,
+              response_format: { type: 'json_object' },
+            }),
+          });
+          if (!rescueResp.ok) { console.warn(`[rescue ${rescueAttempt + 1}] OpenAI error:`, rescueResp.status); continue; }
+          const rescueData = await rescueResp.json();
+          const rescueContent = cleanJson(rescueData.choices?.[0]?.message?.content ?? '');
+          const rescueTask = JSON.parse(rescueContent);
+          const rescueText = (rescueTask?.english_text ?? '').trim();
+          if (!rescueText) { console.warn(`[rescue ${rescueAttempt + 1}] Empty text`); continue; }
+          console.log(`[rescue ${rescueAttempt + 1}] Trying: "${rescueText}"`);
+          result = await saveTask({ english_text: rescueText, description: rescueTask.description ?? `Translate into ${language.name}.`, estimated_time: Number(rescueTask.estimated_time) || 2 }, true);
+          if (result !== 'RECORDED') return result; // null (DB error) or a valid task
+        } catch (rescueErr) {
+          console.error(`[rescue ${rescueAttempt + 1}] Error:`, rescueErr);
+        }
+      }
+
+      console.error('saveTaskWithRetry: exhausted all retries including rescue calls');
+      return null;
     };
 
     // ── Call OpenAI ────────────────────────────────────────────────────────
@@ -476,22 +677,23 @@ serve(async (req) => {
         ],
         temperature: 0.8,
         max_tokens: 200,
+        response_format: { type: 'json_object' },
       }),
     });
 
     if (!openAIResponse.ok) {
       console.error('OpenAI API error:', openAIResponse.status);
       const candidate = pickUniqueFallback(randomType);
-      const newTask = await saveTask({ english_text: candidate.text, description: candidate.description, estimated_time: candidate.estimated }, false);
+      const newTask = await saveTaskWithRetry({ english_text: candidate.text, description: candidate.description, estimated_time: candidate.estimated }, false);
       if (!newTask) return new Response(JSON.stringify({ error: 'Failed to save task' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      console.log('Task generated via fallback (OpenAI error) successfully:', newTask.id);
+      console.log('Task generated via fallback (OpenAI error) successfully:', (newTask as Record<string,unknown>).id);
       return new Response(JSON.stringify({ task: newTask, fallback: true, section: currentSection, section_progress }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const openAIData = await openAIResponse.json();
-    const generatedContent = openAIData.choices[0].message.content;
+    const generatedContent = cleanJson(openAIData.choices[0].message.content ?? '');
     console.log('Generated content:', generatedContent);
 
     let taskData: { english_text: string; description: string; estimated_time: number };
@@ -500,9 +702,9 @@ serve(async (req) => {
     } catch (e) {
       console.error('Failed to parse OpenAI response:', e);
       const f = pickUniqueFallback(randomType);
-      const newTask = await saveTask({ english_text: f.text, description: f.description, estimated_time: f.estimated }, false);
+      const newTask = await saveTaskWithRetry({ english_text: f.text, description: f.description, estimated_time: f.estimated }, false);
       if (!newTask) return new Response(JSON.stringify({ error: 'Failed to save task' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      console.log('Task generated via fallback (parse error) successfully:', newTask.id);
+      console.log('Task generated via fallback (parse error) successfully:', (newTask as Record<string,unknown>).id);
       return new Response(JSON.stringify({ task: newTask, fallback: true, section: currentSection, section_progress }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -514,15 +716,18 @@ serve(async (req) => {
     const aiDesc        = (taskData?.description ?? '').trim();
     const aiEst         = Number(taskData?.estimated_time ?? 2);
 
+    // Only reject AI output that is absent or clearly unnatural.
+    // We do NOT reject text that already exists in usedTexts — saveTask handles
+    // that case correctly: if the task exists and is unrecorded it is returned
+    // directly; if already recorded, saveTask signals 'RECORDED' and we retry.
+    // Filtering on usedTexts here was causing us to discard valid unrecorded tasks.
     const invalidAi =
       !aiEnglishText ||
-      usedTexts.has(aiEnglishText.toLowerCase()) ||
       !isNatural(aiEnglishText, randomType);
 
     if (invalidAi) {
       console.log('AI output rejected. Switching to curated fallback.', {
         missing: !aiEnglishText,
-        duplicate: aiEnglishText ? usedTexts.has(aiEnglishText.toLowerCase()) : false,
         unnatural: aiEnglishText ? !isNatural(aiEnglishText, randomType) : false,
       });
       createdByAi = false;
@@ -533,7 +738,7 @@ serve(async (req) => {
       taskData.description    = aiDesc || `Translate this into ${language.name}.`;
     }
 
-    const newTask = await saveTask(taskData, createdByAi);
+    const newTask = await saveTaskWithRetry(taskData, createdByAi);
     if (!newTask) {
       return new Response(JSON.stringify({ error: 'Failed to save task' }), {
         status: 500,
@@ -541,7 +746,12 @@ serve(async (req) => {
       });
     }
 
-    console.log('Task generated successfully:', newTask.id, '| type:', randomType, '| section:', currentSection);
+    console.log('Task generated successfully:', (newTask as Record<string,unknown>).id, '| type:', randomType, '| section:', currentSection);
+
+    // The pool was at 0 unrecorded tasks when we reached this code path (otherwise we'd
+    // have returned the existing unrecorded task above). Seed a fresh batch in the
+    // background so the next request can be served from the pool without another AI call.
+    maybeSeedInBackground(0);
 
     return new Response(JSON.stringify({ task: newTask, section: currentSection, section_progress }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
